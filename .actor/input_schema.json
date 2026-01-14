@@ -1,0 +1,64 @@
+{
+  "title": "Flipkart Product Scraper",
+  "description": "Extract product listings from Flipkart.com. Provide a category or search URL to scrape products with prices, ratings, and specifications.",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "startUrl": {
+      "title": "Flipkart URL",
+      "type": "string",
+      "description": "Flipkart category or search results URL to scrape.",
+      "editor": "textfield",
+      "prefill": "https://www.flipkart.com/computers/computer-components/monitors/pr?sid=6bo,g0i,9no&marketplace=FLIPKART",
+      "default": "https://www.flipkart.com/computers/computer-components/monitors/pr?sid=6bo,g0i,9no&marketplace=FLIPKART",
+      "example": "https://www.flipkart.com/computers/computer-components/monitors/pr?sid=6bo,g0i,9no&marketplace=FLIPKART"
+    },
+    "results_wanted": {
+      "title": "Maximum Products",
+      "type": "integer",
+      "description": "Maximum number of products to extract.",
+      "minimum": 1,
+      "default": 20,
+      "prefill": 20,
+      "editor": "number"
+    },
+    "max_pages": {
+      "title": "Maximum Pages",
+      "type": "integer",
+      "description": "Maximum number of result pages to process.",
+      "minimum": 1,
+      "default": 3,
+      "prefill": 3,
+      "editor": "number"
+    },
+    "maxConcurrency": {
+      "title": "Max Concurrency",
+      "type": "integer",
+      "description": "Maximum concurrent requests.",
+      "minimum": 1,
+      "maximum": 10,
+      "default": 3,
+      "prefill": 3,
+      "editor": "number"
+    },
+    "proxyConfiguration": {
+      "title": "Proxy Configuration",
+      "type": "object",
+      "description": "Proxy settings for reliable extraction.",
+      "editor": "proxy",
+      "default": {
+        "useApifyProxy": true,
+        "apifyProxyGroups": [
+          "RESIDENTIAL"
+        ]
+      },
+      "prefill": {
+        "useApifyProxy": true,
+        "apifyProxyGroups": [
+          "RESIDENTIAL"
+        ]
+      }
+    }
+  },
+  "required": []
+}

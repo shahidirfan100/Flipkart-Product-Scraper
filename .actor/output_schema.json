@@ -1,0 +1,11 @@
+{
+    "actorOutputSchemaVersion": 1,
+    "title": "Flipkart Products Output",
+    "properties": {
+        "overview": {
+            "type": "string",
+            "title": "Product Overview",
+            "template": "{{links.apiDefaultDatasetUrl}}/items?view=overview"
+        }
+    }
+}

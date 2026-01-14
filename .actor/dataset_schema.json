@@ -1,0 +1,53 @@
+{
+  "actorSpecification": 1,
+  "fields": {},
+  "views": {
+    "overview": {
+      "title": "Overview",
+      "transformation": {
+        "fields": [
+          "title",
+          "price",
+          "original_price",
+          "discount_percent",
+          "rating",
+          "rating_count",
+          "url"
+        ]
+      },
+      "display": {
+        "component": "table",
+        "properties": {
+          "title": {
+            "label": "Product",
+            "format": "text"
+          },
+          "price": {
+            "label": "Price (₹)",
+            "format": "number"
+          },
+          "original_price": {
+            "label": "MRP (₹)",
+            "format": "number"
+          },
+          "discount_percent": {
+            "label": "Discount %",
+            "format": "number"
+          },
+          "rating": {
+            "label": "Rating",
+            "format": "number"
+          },
+          "rating_count": {
+            "label": "Ratings",
+            "format": "number"
+          },
+          "url": {
+            "label": "URL",
+            "format": "link"
+          }
+        }
+      }
+    }
+  }
+}
