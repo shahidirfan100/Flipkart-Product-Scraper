@@ -74,7 +74,6 @@ Flipkart Product Scraper extracts detailed product listings from any Flipkart ca
 | `startUrl` | String | Yes | Flipkart category or search URL to scrape |
 | `results_wanted` | Integer | No | Maximum products to extract (default: 20) |
 | `max_pages` | Integer | No | Maximum pages to process (default: 3) |
-| `maxConcurrency` | Integer | No | Parallel requests limit (default: 3) |
 | `proxyConfiguration` | Object | No | Proxy settings for reliable extraction |
 
 ## Output Data
@@ -181,9 +180,9 @@ Gather e-commerce data for studies on:
 
 For reliable extraction without blocking:
 
-- Set `maxConcurrency` to 3 or lower
 - Enable proxy configuration for large runs
 - Use residential proxies for best success rates
+- Start with smaller product limits for testing
 
 ### Handling Large Datasets
 

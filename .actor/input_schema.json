@@ -31,16 +31,6 @@
       "prefill": 3,
       "editor": "number"
     },
-    "maxConcurrency": {
-      "title": "Max Concurrency",
-      "type": "integer",
-      "description": "Maximum concurrent requests.",
-      "minimum": 1,
-      "maximum": 10,
-      "default": 3,
-      "prefill": 3,
-      "editor": "number"
-    },
     "proxyConfiguration": {
       "title": "Proxy Configuration",
       "type": "object",

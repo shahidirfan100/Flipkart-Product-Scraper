@@ -336,9 +336,11 @@ try {
         startUrl = 'https://www.flipkart.com/computers/computer-components/monitors/pr?sid=6bo,g0i,9no&marketplace=FLIPKART',
         results_wanted: resultsWantedRaw = 20,
         max_pages: maxPagesRaw = 5,
-        maxConcurrency = 3,
         proxyConfiguration,
     } = input;
+
+    // Internal configuration - not exposed to users
+    const maxConcurrency = 3;
 
     const resultsWanted = Number.isFinite(+resultsWantedRaw) ? Math.max(1, +resultsWantedRaw) : 20;
     const maxPages = Number.isFinite(+maxPagesRaw) ? Math.max(1, +maxPagesRaw) : 5;
