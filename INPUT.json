@@ -1,7 +1,6 @@
 {
   "startUrl": "https://www.flipkart.com/computers/computer-components/monitors/pr?sid=6bo,g0i,9no&marketplace=FLIPKART",
   "results_wanted": 20,
-  "max_pages": 3,
   "proxyConfiguration": {
     "useApifyProxy": true
   }

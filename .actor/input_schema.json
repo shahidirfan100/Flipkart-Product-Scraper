@@ -22,15 +22,6 @@
       "prefill": 20,
       "editor": "number"
     },
-    "max_pages": {
-      "title": "Maximum Pages",
-      "type": "integer",
-      "description": "Maximum number of result pages to process.",
-      "minimum": 1,
-      "default": 3,
-      "prefill": 3,
-      "editor": "number"
-    },
     "proxyConfiguration": {
       "title": "Proxy Configuration",
       "type": "object",

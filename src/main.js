@@ -335,34 +335,49 @@ try {
     const {
         startUrl = 'https://www.flipkart.com/computers/computer-components/monitors/pr?sid=6bo,g0i,9no&marketplace=FLIPKART',
         results_wanted: resultsWantedRaw = 20,
-        max_pages: maxPagesRaw = 5,
         proxyConfiguration,
     } = input;
 
     // Internal configuration - not exposed to users
     const maxConcurrency = 3;
+    const PRODUCTS_PER_PAGE = 24; // Flipkart shows ~24 products per page
+    const BATCH_SIZE = 10; // Push data in batches of 10
 
     const resultsWanted = Number.isFinite(+resultsWantedRaw) ? Math.max(1, +resultsWantedRaw) : 20;
-    const maxPages = Number.isFinite(+maxPagesRaw) ? Math.max(1, +maxPagesRaw) : 5;
+
+    // Auto-calculate max pages needed based on products wanted
+    const maxPages = Math.ceil(resultsWanted / PRODUCTS_PER_PAGE) + 2; // Add buffer pages for duplicates/missing
+
     const proxyConf = proxyConfiguration
         ? await Actor.createProxyConfiguration({ ...proxyConfiguration })
         : undefined;
 
     log.info(`🚀 Starting Flipkart Product Scraper`);
     log.info(`📋 Target: ${startUrl}`);
-    log.info(`📊 Goals: ${resultsWanted} products, max ${maxPages} pages`);
+    log.info(`📊 Goals: ${resultsWanted} products (auto-calculated max ${maxPages} pages)`);
 
     const seenIds = new Set();
-    const allProducts = [];
+    const pendingProducts = []; // Buffer for batch pushing
+    let totalPushed = 0;
     const startTime = Date.now();
     const MAX_RUNTIME_MS = 4 * 60 * 1000; // 4 minutes safety for QA
 
     let stats = { pagesProcessed: 0, productsFound: 0, errors: 0 };
 
-    for (let page = 1; page <= maxPages && allProducts.length < resultsWanted; page += 1) {
+    // Helper to push batch to dataset
+    const pushBatch = async (force = false) => {
+        if (pendingProducts.length >= BATCH_SIZE || (force && pendingProducts.length > 0)) {
+            const batch = pendingProducts.splice(0, BATCH_SIZE);
+            await Dataset.pushData(batch);
+            totalPushed += batch.length;
+            log.info(`📦 Pushed batch of ${batch.length} products (total pushed: ${totalPushed})`);
+        }
+    };
+
+    for (let page = 1; page <= maxPages && (totalPushed + pendingProducts.length) < resultsWanted; page += 1) {
         // Timeout safety
         if (Date.now() - startTime > MAX_RUNTIME_MS) {
-            log.info(`⏱️ Approaching timeout. Stopping gracefully at ${allProducts.length} products.`);
+            log.info(`⏱️ Approaching timeout. Stopping gracefully at ${totalPushed + pendingProducts.length} products.`);
             break;
         }
 
@@ -392,31 +407,35 @@ try {
             break;
         }
 
-        productCards.each((_, cardEl) => {
-            if (allProducts.length >= resultsWanted) return false; // Break early
+        for (let i = 0; i < productCards.length; i++) {
+            if ((totalPushed + pendingProducts.length) >= resultsWanted) break;
 
             try {
-                const product = extractProduct($, cardEl);
+                const product = extractProduct($, productCards[i]);
 
                 // Skip duplicates
-                if (product.id && seenIds.has(product.id)) return;
+                if (product.id && seenIds.has(product.id)) continue;
                 if (product.id) seenIds.add(product.id);
 
                 // Skip invalid products
-                if (!product.title && !product.price) return;
+                if (!product.title && !product.price) continue;
 
-                allProducts.push(product);
+                pendingProducts.push(product);
                 stats.productsFound += 1;
+
+                // Push batch when buffer is full
+                await pushBatch();
             } catch (err) {
                 stats.errors += 1;
                 log.warning(`⚠️ Failed to extract product: ${err.message}`);
             }
-        });
+        }
 
-        log.info(`✅ Page ${page} complete. Total products: ${allProducts.length}/${resultsWanted}`);
+        const currentTotal = totalPushed + pendingProducts.length;
+        log.info(`✅ Page ${page} complete. Total products: ${currentTotal}/${resultsWanted}`);
 
         // Check if we have enough
-        if (allProducts.length >= resultsWanted) {
+        if (currentTotal >= resultsWanted) {
             log.info(`🎯 Reached target of ${resultsWanted} products.`);
             break;
         }
@@ -429,38 +448,32 @@ try {
         }
     }
 
-    // Push all products to dataset
-    if (allProducts.length > 0) {
-        // Batch push for efficiency
-        const batchSize = 50;
-        for (let i = 0; i < allProducts.length; i += batchSize) {
-            const batch = allProducts.slice(i, i + batchSize);
-            await Dataset.pushData(batch);
-        }
-    }
+    // Push any remaining products
+    await pushBatch(true);
 
+    const totalProducts = totalPushed;
     const totalTime = (Date.now() - startTime) / 1000;
 
     // Final statistics
     log.info('='.repeat(60));
     log.info('📊 FLIPKART SCRAPER STATISTICS');
     log.info('='.repeat(60));
-    log.info(`✅ Products extracted: ${allProducts.length}/${resultsWanted}`);
-    log.info(`📄 Pages processed: ${stats.pagesProcessed}/${maxPages}`);
+    log.info(`✅ Products extracted: ${totalProducts}/${resultsWanted}`);
+    log.info(`📄 Pages processed: ${stats.pagesProcessed}`);
     log.info(`⚠️  Errors: ${stats.errors}`);
     log.info(`⏱️  Runtime: ${totalTime.toFixed(2)}s`);
-    log.info(`⚡ Speed: ${(allProducts.length / totalTime).toFixed(2)} products/sec`);
+    log.info(`⚡ Speed: ${(totalProducts / totalTime).toFixed(2)} products/sec`);
     log.info('='.repeat(60));
 
     // QA validation
-    if (allProducts.length === 0) {
+    if (totalProducts === 0) {
         const errorMsg = 'No products extracted. Check if URL is valid and page structure has not changed.';
         log.error(`❌ ${errorMsg}`);
         await Actor.fail(errorMsg);
     } else {
-        log.info(`🎉 SUCCESS: Extracted ${allProducts.length} products!`);
+        log.info(`🎉 SUCCESS: Extracted ${totalProducts} products!`);
         await Actor.setValue('OUTPUT_SUMMARY', {
-            productsExtracted: allProducts.length,
+            productsExtracted: totalProducts,
             pagesProcessed: stats.pagesProcessed,
             runtime: totalTime,
             success: true,
@@ -473,3 +486,4 @@ try {
 } finally {
     await Actor.exit();
 }
+

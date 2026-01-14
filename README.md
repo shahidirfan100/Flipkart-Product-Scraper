@@ -48,8 +48,7 @@ Flipkart Product Scraper extracts detailed product listings from any Flipkart ca
 ```json
 {
   "startUrl": "https://www.flipkart.com/mobiles/pr?sid=tyy,4io&marketplace=FLIPKART",
-  "results_wanted": 100,
-  "max_pages": 10
+  "results_wanted": 100
 }
 ```
 
@@ -59,7 +58,6 @@ Flipkart Product Scraper extracts detailed product listings from any Flipkart ca
 {
   "startUrl": "https://www.flipkart.com/laptops/pr?sid=6bo,b5g&marketplace=FLIPKART",
   "results_wanted": 200,
-  "max_pages": 15,
   "proxyConfiguration": {
     "useApifyProxy": true,
     "apifyProxyGroups": ["RESIDENTIAL"]
@@ -73,7 +71,6 @@ Flipkart Product Scraper extracts detailed product listings from any Flipkart ca
 |-----------|------|----------|-------------|
 | `startUrl` | String | Yes | Flipkart category or search URL to scrape |
 | `results_wanted` | Integer | No | Maximum products to extract (default: 20) |
-| `max_pages` | Integer | No | Maximum pages to process (default: 3) |
 | `proxyConfiguration` | Object | No | Proxy settings for reliable extraction |
 
 ## Output Data
