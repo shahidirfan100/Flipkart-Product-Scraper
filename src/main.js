@@ -1,42 +1,27 @@
-// Flipkart Product Scraper - HTTP + HTML parsing with stealth
+// Flipkart Product Scraper - listing API/state extraction only (no product page visits)
 import { Actor, log } from 'apify';
 import { Dataset, gotScraping, sleep } from 'crawlee';
-import { load as cheerioLoad } from 'cheerio';
 
-// Flipkart product selectors (verified for list view)
-const SELECTORS = {
-    productCard: 'div[data-id]',
-    title: '.RG5Slk, .KzDlHZ, ._4rR01T',
-    salePrice: '.hZ3P6w, .Nx9bqj, ._30jeq3',
-    originalPrice: '.y6Y9S4, ._3I9_wc, ._27UcVY',
-    discount: '.HQe8jr, .UkUFwK, ._3Ay6Sb',
-    rating: '.MKiFS6, ._3LWZlK',
-    ratingCount: '.PvbNMB, ._2_R_DZ',
-    image: 'img.UCc1lI, img.DByoQZ, img._396cs4',
-    productUrl: 'a.k7wcnx, a.CGtC98, a._1fQZEK, a.rPDeLR',
-    specifications: 'ul.HwRTzP, ul._1xgFaf',
-    nextButton: 'a._1LKTO3 span:contains("Next"), a.jgg0SZ',
-};
-
-// Stealth headers rotation pool
 const USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
 ];
+
+const BLOCK_TITLE_PATTERNS = ['access denied', 'captcha', 'robot check', 'unusual activity'];
 
 const getRandomUserAgent = () => USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 
 const getStealthHeaders = () => ({
     'User-Agent': getRandomUserAgent(),
-    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
     'Accept-Encoding': 'gzip, deflate, br',
     'Cache-Control': 'no-cache',
     Pragma: 'no-cache',
-    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="122", "Google Chrome";v="122"',
     'Sec-Ch-Ua-Mobile': '?0',
     'Sec-Ch-Ua-Platform': '"Windows"',
     'Sec-Fetch-Dest': 'document',
@@ -47,33 +32,10 @@ const getStealthHeaders = () => ({
     Connection: 'keep-alive',
 });
 
-// Concurrency limiter
-const createLimiter = (maxConcurrency) => {
-    let active = 0;
-    const queue = [];
-    const next = () => {
-        if (active >= maxConcurrency || queue.length === 0) return;
-        active += 1;
-        const { task, resolve, reject } = queue.shift();
-        task()
-            .then(resolve)
-            .catch(reject)
-            .finally(() => {
-                active -= 1;
-                next();
-            });
-    };
-    return (task) =>
-        new Promise((resolve, reject) => {
-            queue.push({ task, resolve, reject });
-            next();
-        });
-};
-
-// Retry with exponential backoff
-const requestWithRetry = async (fn, context, maxRetries = 4) => {
+const requestWithRetry = async (fn, context, maxRetries = 3) => {
     let attempt = 0;
     let lastError;
+
     while (attempt < maxRetries) {
         attempt += 1;
         try {
@@ -81,253 +43,405 @@ const requestWithRetry = async (fn, context, maxRetries = 4) => {
         } catch (error) {
             lastError = error;
             const statusCode = error.response?.statusCode;
+
             if (statusCode === 404) throw error;
 
-            log.warning(`${context} failed (Attempt ${attempt}/${maxRetries}): ${error.message}`);
+            log.warning(`${context} failed (attempt ${attempt}/${maxRetries}): ${error.message}`);
 
             if (attempt < maxRetries) {
-                const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1500;
-                await sleep(delay);
+                const delayMs = (2 ** attempt) * 400 + Math.random() * 700;
+                await sleep(delayMs);
             }
         }
     }
+
     throw lastError;
 };
 
-// Proxy URL picker
 const pickProxyUrl = async (proxyConfiguration) =>
     proxyConfiguration ? proxyConfiguration.newUrl() : undefined;
 
-// Build paginated URL
 const buildPageUrl = (baseUrl, page) => {
     const url = new URL(baseUrl);
-    if (page > 1) {
-        url.searchParams.set('page', String(page));
-    }
+    if (page > 1) url.searchParams.set('page', String(page));
     return url.href;
 };
 
-// Parse price string to number
-const parsePrice = (priceStr) => {
-    if (!priceStr) return null;
-    const cleaned = priceStr.replace(/[₹,\s]/g, '');
-    const num = parseInt(cleaned, 10);
-    return Number.isFinite(num) ? num : null;
+const toNumber = (value) => {
+    if (value === null || value === undefined) return null;
+    const n = typeof value === 'number' ? value : Number(String(value).replace(/[^\d.-]/g, ''));
+    return Number.isFinite(n) ? n : null;
 };
 
-// Parse rating string
-const parseRating = (ratingStr) => {
-    if (!ratingStr) return null;
-    const match = ratingStr.match(/(\d+\.?\d*)/);
-    return match ? parseFloat(match[1]) : null;
-};
+const toBoolean = (value) => (typeof value === 'boolean' ? value : null);
 
-// Parse rating count (e.g., "21 Ratings & 3 Reviews")
-const parseRatingCount = (countStr) => {
-    if (!countStr) return { ratings: null, reviews: null };
-    const ratingsMatch = countStr.match(/([\d,]+)\s*Ratings?/i);
-    const reviewsMatch = countStr.match(/([\d,]+)\s*Reviews?/i);
-    return {
-        ratings: ratingsMatch ? parseInt(ratingsMatch[1].replace(/,/g, ''), 10) : null,
-        reviews: reviewsMatch ? parseInt(reviewsMatch[1].replace(/,/g, ''), 10) : null,
-    };
-};
-
-// Parse discount string
-const parseDiscount = (discountStr) => {
-    if (!discountStr) return null;
-    const match = discountStr.match(/(\d+)\s*%/);
+const parseDiscountPercent = (value) => {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    const match = String(value).match(/(\d+)\s*%/);
     return match ? parseInt(match[1], 10) : null;
 };
 
-// Clean image URL (remove query params for cleaner URL)
-const cleanImageUrl = (imgUrl) => {
-    if (!imgUrl) return null;
+const asText = (value) => (value === null || value === undefined ? null : String(value).trim() || null);
+
+const asTextArray = (value) => {
+    if (Array.isArray(value)) {
+        const list = value.map((item) => asText(item)).filter(Boolean);
+        return list.length > 0 ? list : null;
+    }
+
+    if (value && typeof value === 'object') {
+        const list = Object.values(value).map((item) => asText(item)).filter(Boolean);
+        return list.length > 0 ? list : null;
+    }
+
+    const text = asText(value);
+    return text ? [text] : null;
+};
+
+const parseSchemaToken = (value) => {
+    const str = asText(value);
+    if (!str) return null;
+    if (!str.includes('/')) return str;
+    return str.split('/').pop() || null;
+};
+
+const normalizeAvailability = (value) => {
+    const token = parseSchemaToken(value);
+    if (!token) return null;
+
+    const normalized = token.toUpperCase();
+    if (normalized === 'INSTOCK') return 'IN_STOCK';
+    if (normalized === 'OUTOFSTOCK') return 'OUT_OF_STOCK';
+    if (normalized === 'PREORDER' || normalized === 'PREBOOK') return 'PREORDER';
+    return normalized;
+};
+
+const buildRatingBreakdown = (values) => {
+    if (!Array.isArray(values) || values.length === 0) return null;
+    const breakdown = {};
+
+    if (values.every((item) => typeof item === 'number')) {
+        values.forEach((count, idx) => {
+            breakdown[String(idx + 1)] = count;
+        });
+    } else {
+        values.forEach((item) => {
+            const ratingValue = asText(item?.ratingValue);
+            const ratingCount = toNumber(item?.ratingCount);
+            if (ratingValue && ratingCount !== null) breakdown[ratingValue] = ratingCount;
+        });
+    }
+
+    return Object.keys(breakdown).length > 0 ? breakdown : null;
+};
+
+const formatInr = (value) => (value === null || value === undefined ? null : `₹${value}`);
+
+const sanitizeImageUrl = (url) => {
+    if (!url) return null;
+    const raw = String(url).trim();
+    if (!raw || raw.toLowerCase().includes('proxied content')) return null;
+    return raw
+        .replace('http://', 'https://')
+        .replace('{@width}', '832')
+        .replace('{@height}', '832')
+        .replace('{@quality}', '75');
+};
+
+const buildDiscountText = (discountPercent) =>
+    discountPercent !== null && discountPercent !== undefined ? `${discountPercent}% off` : null;
+
+const ensureAbsoluteUrl = (rawUrl) => {
+    if (!rawUrl) return null;
     try {
-        const url = new URL(imgUrl);
-        return `${url.origin}${url.pathname}`;
+        return new URL(rawUrl, 'https://www.flipkart.com').href;
     } catch {
-        return imgUrl;
+        return null;
     }
 };
 
-// Extract specifications from list
-const parseSpecifications = ($, specsEl) => {
-    const specs = {};
-    if (!specsEl || !specsEl.length) return specs;
+const extractItemIdFromUrl = (rawUrl) => {
+    const absolute = ensureAbsoluteUrl(rawUrl);
+    if (!absolute) return null;
+    const match = absolute.match(/\/(itm[a-z0-9]+)/i);
+    return match ? asText(match[1]) : null;
+};
 
-    specsEl.find('li').each((_, li) => {
-        const text = $(li).text().trim();
-        // Try to split on common patterns
-        if (text.includes(':')) {
-            const [key, ...valueParts] = text.split(':');
-            specs[key.trim()] = valueParts.join(':').trim();
-        } else if (text.includes(' - ')) {
-            const [key, ...valueParts] = text.split(' - ');
-            specs[key.trim()] = valueParts.join(' - ').trim();
-        } else {
-            // Store as is with index
-            specs[`spec_${Object.keys(specs).length + 1}`] = text;
+const getUrlQueryParam = (rawUrl, key) => {
+    if (!rawUrl || !key) return null;
+    try {
+        const value = new URL(rawUrl, 'https://www.flipkart.com').searchParams.get(key);
+        return asText(value);
+    } catch {
+        return null;
+    }
+};
+
+const isLikelyBlocked = (html = '') => {
+    const title = html.match(/<title>([\s\S]*?)<\/title>/i)?.[1]?.trim().toLowerCase() || '';
+    return BLOCK_TITLE_PATTERNS.some((pattern) => title.includes(pattern));
+};
+
+const extractBalancedJsonObject = (text, startIndex) => {
+    let i = startIndex;
+    while (i < text.length && text[i] !== '{') i += 1;
+    if (text[i] !== '{') return null;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let j = i; j < text.length; j += 1) {
+        const ch = text[j];
+
+        if (inString) {
+            if (escaped) escaped = false;
+            else if (ch === '\\') escaped = true;
+            else if (ch === '"') inString = false;
+            continue;
         }
-    });
+
+        if (ch === '"') {
+            inString = true;
+            continue;
+        }
+
+        if (ch === '{') depth += 1;
+        else if (ch === '}') {
+            depth -= 1;
+            if (depth === 0) {
+                return text.slice(i, j + 1);
+            }
+        }
+    }
+
+    return null;
+};
+
+const parseInitialStateFromHtml = (html) => {
+    const marker = 'window.__INITIAL_STATE__ = ';
+    const index = html.indexOf(marker);
+    if (index === -1) return null;
+
+    const jsonText = extractBalancedJsonObject(html, index + marker.length);
+    if (!jsonText) return null;
+
+    try {
+        return JSON.parse(jsonText);
+    } catch (error) {
+        log.warning(`Failed to parse window.__INITIAL_STATE__: ${error.message}`);
+        return null;
+    }
+};
+
+const findStateListingProducts = (state) => {
+    const products = [];
+    const visited = new WeakSet();
+
+    const walk = (node) => {
+        if (!node || typeof node !== 'object') return;
+        if (visited.has(node)) return;
+        visited.add(node);
+
+        if (Array.isArray(node)) {
+            for (const item of node) walk(item);
+            return;
+        }
+
+        if (Array.isArray(node.products)) {
+            for (const product of node.products) {
+                if (product?.productInfo?.value?.id || product?.productInfo?.action?.url) {
+                    products.push(product);
+                }
+            }
+        }
+
+        for (const value of Object.values(node)) {
+            walk(value);
+        }
+    };
+
+    walk(state?.pageDataV4?.page?.data);
+    return products;
+};
+
+const getListingPrices = (value) => {
+    const pricing = value?.pricing || {};
+    const prices = Array.isArray(pricing?.prices) ? pricing.prices : [];
+
+    const specialPriceObj = prices.find((p) => p?.priceType === 'SPECIAL_PRICE')
+        || prices.find((p) => String(p?.name || '').toLowerCase().includes('special'));
+    const originalPriceObj = prices.find((p) => p?.strikeOff === true)
+        || prices.find((p) => p?.priceType === 'FSP')
+        || null;
+    const nonStrikeOffPriceObj = prices.find((p) => p?.strikeOff === false);
+
+    const salePrice = toNumber(specialPriceObj?.value)
+        ?? toNumber(nonStrikeOffPriceObj?.value)
+        ?? toNumber(pricing?.finalPrice?.value)
+        ?? toNumber(pricing?.sellingPrice?.value)
+        ?? toNumber(pricing?.discountedPrice?.value)
+        ?? toNumber(prices[0]?.value);
+
+    const originalPrice = toNumber(originalPriceObj?.value)
+        ?? toNumber(pricing?.basePrice?.value)
+        ?? toNumber(pricing?.mrp?.value)
+        ?? toNumber(pricing?.maxRetailPrice?.value);
+
+    let discountPercent = toNumber(pricing?.totalDiscount)
+        ?? parseDiscountPercent(pricing?.discountLabel)
+        ?? parseDiscountPercent(value?.discountLabel);
+
+    if (discountPercent === null && originalPrice && salePrice) {
+        discountPercent = Math.round(((originalPrice - salePrice) / originalPrice) * 100);
+    }
+
+    const discountAmount = toNumber(pricing?.discountAmount)
+        ?? ((originalPrice !== null && salePrice !== null) ? originalPrice - salePrice : null);
+
+    const currency = asText(prices.find((p) => p?.currency)?.currency)
+        ?? asText(pricing?.finalPrice?.currency)
+        ?? asText(pricing?.currency)
+        ?? 'INR';
+
+    return { salePrice, originalPrice, discountPercent, discountAmount, currency };
+};
+
+const buildBaseSpecifications = (value) => {
+    const specs = {};
+    const subtitle = asText(value?.titles?.subtitle);
+    const coSubtitle = asText(value?.titles?.coSubtitle);
+    const superTitle = asText(value?.titles?.superTitle);
+    const vertical = asText(value?.analyticsData?.vertical);
+    const analyticsCategory = asText(value?.analyticsData?.category);
+    const analyticsSubCategory = asText(value?.analyticsData?.subCategory);
+
+    if (subtitle) specs.subtitle = subtitle;
+    if (coSubtitle) specs.variant = coSubtitle;
+    if (superTitle) specs.brand = superTitle;
+    if (vertical) specs.category = vertical;
+    if (analyticsCategory) specs.analytics_category = analyticsCategory;
+    if (analyticsSubCategory) specs.analytics_sub_category = analyticsSubCategory;
+
+    const keySpecs = asTextArray(value?.keySpecs);
+    if (keySpecs) {
+        for (const spec of keySpecs) {
+            const [rawKey, ...rawVal] = spec.split(':');
+            const k = asText(rawKey);
+            const v = asText(rawVal.join(':'));
+            if (k && v && !specs[k]) specs[k] = v;
+        }
+    }
 
     return Object.keys(specs).length > 0 ? specs : null;
 };
 
-// Extract product data from a card element
-const extractProduct = ($, cardEl) => {
-    const card = $(cardEl);
-    const productId = card.attr('data-id');
+const mapListingProduct = (product) => {
+    const value = product?.productInfo?.value || {};
+    const actionUrl = product?.productInfo?.action?.url || value?.baseUrl || value?.url || null;
 
-    // Title - try multiple selectors
-    let title = null;
-    for (const sel of SELECTORS.title.split(', ')) {
-        const el = card.find(sel).first();
-        if (el.length) {
-            title = el.text().trim();
-            break;
-        }
-    }
+    const { salePrice, originalPrice, discountPercent, discountAmount, currency } = getListingPrices(value);
 
-    // Sale price
-    let salePrice = null;
-    for (const sel of SELECTORS.salePrice.split(', ')) {
-        const el = card.find(sel).first();
-        if (el.length) {
-            salePrice = el.text().trim();
-            break;
-        }
-    }
+    const listingAvailability = normalizeAvailability(
+        value?.availability?.displayState || value?.availability?.status || value?.availabilityStatus
+    );
+    const buyabilityIntent = asText(value?.buyability?.intent)?.toUpperCase() || null;
+    let fallbackAvailability = null;
+    if (buyabilityIntent === 'POSITIVE') fallbackAvailability = 'IN_STOCK';
+    else if (buyabilityIntent === 'NEGATIVE') fallbackAvailability = 'OUT_OF_STOCK';
+    const resolvedAvailability = listingAvailability || fallbackAvailability;
 
-    // Original price
-    let originalPrice = null;
-    for (const sel of SELECTORS.originalPrice.split(', ')) {
-        const el = card.find(sel).first();
-        if (el.length) {
-            originalPrice = el.text().trim();
-            break;
-        }
-    }
+    const fallbackBrand = asText(value?.titles?.title)?.split(' ')?.[0] || null;
+    const specs = buildBaseSpecifications(value);
 
-    // Discount
-    let discount = null;
-    for (const sel of SELECTORS.discount.split(', ')) {
-        const el = card.find(sel).first();
-        if (el.length) {
-            discount = el.text().trim();
-            break;
-        }
-    }
+    const resolvedUrl = ensureAbsoluteUrl(actionUrl);
+    const resolvedItemId = asText(value?.itemId) || extractItemIdFromUrl(actionUrl);
+    const marketPlace = getUrlQueryParam(actionUrl, 'marketplace')
+        || asText(value?.marketPlace)
+        || 'FLIPKART';
 
-    // Rating
-    let rating = null;
-    for (const sel of SELECTORS.rating.split(', ')) {
-        const el = card.find(sel).first();
-        if (el.length) {
-            rating = el.text().trim();
-            break;
-        }
-    }
-
-    // Rating count
-    let ratingCountText = null;
-    for (const sel of SELECTORS.ratingCount.split(', ')) {
-        const el = card.find(sel).first();
-        if (el.length) {
-            ratingCountText = el.text().trim();
-            break;
-        }
-    }
-
-    // Image
-    let imageUrl = null;
-    for (const sel of SELECTORS.image.split(', ')) {
-        const el = card.find(sel).first();
-        if (el.length) {
-            imageUrl = el.attr('src') || el.attr('data-src');
-            break;
-        }
-    }
-
-    // Product URL
-    let productUrl = null;
-    for (const sel of SELECTORS.productUrl.split(', ')) {
-        const el = card.find(sel).first();
-        if (el.length) {
-            productUrl = el.attr('href');
-            break;
-        }
-    }
-    // Fallback: find any link with /p/ in href
-    if (!productUrl) {
-        const anyLink = card.find('a[href*="/p/"]').first();
-        if (anyLink.length) {
-            productUrl = anyLink.attr('href');
-        }
-    }
-
-    // Specifications
-    let specifications = null;
-    for (const sel of SELECTORS.specifications.split(', ')) {
-        const el = card.find(sel).first();
-        if (el.length) {
-            specifications = parseSpecifications($, el);
-            break;
-        }
-    }
-
-    // Parse values
-    const ratingCounts = parseRatingCount(ratingCountText);
+    let isAvailableFromStatus = null;
+    if (resolvedAvailability === 'IN_STOCK') isAvailableFromStatus = true;
+    else if (resolvedAvailability === 'OUT_OF_STOCK') isAvailableFromStatus = false;
 
     return {
-        id: productId || null,
-        title: title || null,
-        price: parsePrice(salePrice),
-        price_text: salePrice || null,
-        original_price: parsePrice(originalPrice),
-        original_price_text: originalPrice || null,
-        discount_percent: parseDiscount(discount),
-        discount_text: discount || null,
-        rating: parseRating(rating),
-        rating_count: ratingCounts.ratings,
-        review_count: ratingCounts.reviews,
-        specifications,
-        image_url: cleanImageUrl(imageUrl),
-        url: productUrl ? new URL(productUrl, 'https://www.flipkart.com').href : null,
+        id: asText(value?.id || value?.productId),
+        item_id: resolvedItemId,
+        listing_id: asText(value?.listingId),
+        title: asText(value?.titles?.title || value?.titles?.newTitle || value?.title),
+        brand: asText(value?.productBrand || value?.brand || value?.titles?.superTitle || fallbackBrand),
+        category: asText(value?.analyticsData?.vertical || value?.vertical || value?.category),
+        price: salePrice,
+        price_text: formatInr(salePrice),
+        original_price: originalPrice,
+        original_price_text: formatInr(originalPrice),
+        discount_percent: discountPercent,
+        discount_amount: discountAmount,
+        discount_text: buildDiscountText(discountPercent),
+        rating: toNumber(value?.rating?.average || value?.rating?.value),
+        rating_count: toNumber(value?.rating?.count || value?.ratingCount),
+        review_count: toNumber(value?.rating?.reviewCount || value?.reviewCount),
+        rating_breakdown: buildRatingBreakdown(value?.rating?.breakup || value?.ratingBreakdown),
+        specifications: specs,
+        key_specs: asTextArray(value?.keySpecs),
+        warranty_summary: asText(value?.warrantySummary),
+        availability_status: resolvedAvailability,
+        is_available: isAvailableFromStatus ?? toBoolean(value?.availability?.isAvailable),
+        buyability_intent: buyabilityIntent,
+        is_flipkart_advantage: toBoolean(value?.flags?.enableFlipkartAdvantage),
+        swatch_available: toBoolean(value?.flags?.swatchAvailableOnBrowsePage),
+        currency,
+        analytics_category: asText(value?.analyticsData?.category),
+        analytics_sub_category: asText(value?.analyticsData?.subCategory),
+        market_place: marketPlace,
+        image_url: sanitizeImageUrl(value?.media?.images?.[0]?.url || value?.imageUrl),
+        url: resolvedUrl,
         fetched_at: new Date().toISOString(),
     };
 };
 
-// Fetch a listing page
-const fetchListingPage = async (url, proxyConfiguration) => {
-    return requestWithRetry(
+const fetchHtml = async (url, proxyConfiguration, options = {}) =>
+    requestWithRetry(
         async () => {
-            // Random delay for stealth (500-2000ms)
-            await sleep(500 + Math.random() * 1500);
+            const {
+                minDelayMs = 20,
+                maxDelayMs = 90,
+                timeoutMs = 20000,
+            } = options;
 
-            const res = await gotScraping({
+            await sleep(minDelayMs + Math.random() * Math.max(0, maxDelayMs - minDelayMs));
+
+            const response = await gotScraping({
                 url,
                 headers: getStealthHeaders(),
                 responseType: 'text',
                 proxyUrl: await pickProxyUrl(proxyConfiguration),
-                timeout: { request: 30000 },
+                timeout: { request: timeoutMs },
                 throwHttpErrors: false,
                 followRedirect: true,
-                retry: { limit: 0 }, // We handle retries ourselves
+                retry: { limit: 0 },
             });
 
-            if (res.statusCode >= 400) {
-                throw new Error(`HTTP ${res.statusCode} for ${url}`);
+            if (response.statusCode >= 400) {
+                throw new Error(`HTTP ${response.statusCode} for ${url}`);
             }
 
-            return res.body;
+            const html = response.body || '';
+            if (!html || html.length < 800) {
+                throw new Error(`Unexpectedly short response for ${url}`);
+            }
+
+            if (isLikelyBlocked(html)) {
+                throw new Error(`Likely blocked page content for ${url}`);
+            }
+
+            return html;
         },
         `Fetch ${url}`,
-        4
+        options.maxRetries ?? 2
     );
-};
 
-// Main scraper logic
 await Actor.init();
 
 try {
@@ -338,152 +452,165 @@ try {
         proxyConfiguration,
     } = input;
 
-    // Internal configuration - not exposed to users
-    const maxConcurrency = 3;
-    const PRODUCTS_PER_PAGE = 24; // Flipkart shows ~24 products per page
-    const BATCH_SIZE = 10; // Push data in batches of 10
-
     const resultsWanted = Number.isFinite(+resultsWantedRaw) ? Math.max(1, +resultsWantedRaw) : 20;
-
-    // Auto-calculate max pages needed based on products wanted
-    const maxPages = Math.ceil(resultsWanted / PRODUCTS_PER_PAGE) + 2; // Add buffer pages for duplicates/missing
+    const productsPerPageEstimate = 40;
+    const maxPages = Math.ceil(resultsWanted / productsPerPageEstimate) + 6;
+    const batchSize = 40;
+    const maxRuntimeMs = 4 * 60 * 1000;
 
     const proxyConf = proxyConfiguration
         ? await Actor.createProxyConfiguration({ ...proxyConfiguration })
         : undefined;
 
-    log.info(`🚀 Starting Flipkart Product Scraper`);
-    log.info(`📋 Target: ${startUrl}`);
-    log.info(`📊 Goals: ${resultsWanted} products (auto-calculated max ${maxPages} pages)`);
+    log.info('Starting Flipkart Product Scraper (listing API/state only)');
+    log.info(`Target URL: ${startUrl}`);
+    log.info(`Requested products: ${resultsWanted}`);
+    log.info('Mode: fast listing only (no product detail page visits)');
 
     const seenIds = new Set();
-    const pendingProducts = []; // Buffer for batch pushing
-    let totalPushed = 0;
+    const seenUrls = new Set();
+    const pendingProducts = [];
+
     const startTime = Date.now();
-    const MAX_RUNTIME_MS = 4 * 60 * 1000; // 4 minutes safety for QA
+    let totalPushed = 0;
+    let consecutiveEmptyPages = 0;
 
-    let stats = { pagesProcessed: 0, productsFound: 0, errors: 0 };
+    const stats = {
+        pagesProcessed: 0,
+        listingProductsSeen: 0,
+        productsExtracted: 0,
+        duplicateProducts: 0,
+        errors: 0,
+    };
 
-    // Helper to push batch to dataset
     const pushBatch = async (force = false) => {
-        if (pendingProducts.length >= BATCH_SIZE || (force && pendingProducts.length > 0)) {
-            const batch = pendingProducts.splice(0, BATCH_SIZE);
+        if (pendingProducts.length >= batchSize || (force && pendingProducts.length > 0)) {
+            const batch = pendingProducts.splice(0, batchSize);
             await Dataset.pushData(batch);
             totalPushed += batch.length;
-            log.info(`📦 Pushed batch of ${batch.length} products (total pushed: ${totalPushed})`);
+            log.info(`Pushed batch of ${batch.length} products (total ${totalPushed})`);
         }
     };
 
     for (let page = 1; page <= maxPages && (totalPushed + pendingProducts.length) < resultsWanted; page += 1) {
-        // Timeout safety
-        if (Date.now() - startTime > MAX_RUNTIME_MS) {
-            log.info(`⏱️ Approaching timeout. Stopping gracefully at ${totalPushed + pendingProducts.length} products.`);
+        if (Date.now() - startTime > maxRuntimeMs) {
+            log.info(`Stopping near timeout with ${totalPushed + pendingProducts.length} products prepared`);
             break;
         }
 
         const pageUrl = buildPageUrl(startUrl, page);
-        log.info(`📄 Fetching page ${page}: ${pageUrl}`);
+        log.info(`Fetching listing page ${page}: ${pageUrl}`);
 
-        let html;
+        let listingHtml;
         try {
-            html = await fetchListingPage(pageUrl, proxyConf);
+            listingHtml = await fetchHtml(pageUrl, proxyConf, {
+                minDelayMs: 20,
+                maxDelayMs: 90,
+                timeoutMs: 20000,
+                maxRetries: 2,
+            });
             stats.pagesProcessed += 1;
-        } catch (err) {
+        } catch (error) {
             stats.errors += 1;
-            log.error(`❌ Failed to fetch page ${page}: ${err.message}`);
-            if (page === 1) {
-                // Critical: first page failed
-                throw new Error(`Failed to fetch first page: ${err.message}`);
-            }
+            log.error(`Failed to fetch listing page ${page}: ${error.message}`);
+            if (page === 1) throw new Error(`Failed to fetch first page: ${error.message}`);
             continue;
         }
 
-        const $ = cheerioLoad(html);
-        const productCards = $(SELECTORS.productCard);
-        log.info(`🔍 Found ${productCards.length} product cards on page ${page}`);
+        const listingState = parseInitialStateFromHtml(listingHtml);
+        const stateProducts = listingState ? findStateListingProducts(listingState) : [];
+        log.info(`Found ${stateProducts.length} products in listing state on page ${page}`);
 
-        if (productCards.length === 0) {
-            log.warning(`⚠️ No products found on page ${page}. Stopping pagination.`);
-            break;
+        if (stateProducts.length === 0) {
+            consecutiveEmptyPages += 1;
+            const debugTitle = listingHtml.match(/<title>([\s\S]*?)<\/title>/i)?.[1] || 'unknown';
+            log.warning(`No listing products found in state JSON. Title: ${debugTitle}`);
+            if (page === 1) {
+                await Actor.setValue('debug-listing-html', listingHtml, { contentType: 'text/html' });
+            }
+            if (consecutiveEmptyPages >= 2) break;
+            continue;
         }
 
-        for (let i = 0; i < productCards.length; i++) {
+        consecutiveEmptyPages = 0;
+
+        let pageUnique = 0;
+        for (const stateProduct of stateProducts) {
             if ((totalPushed + pendingProducts.length) >= resultsWanted) break;
 
-            try {
-                const product = extractProduct($, productCards[i]);
+            const mapped = mapListingProduct(stateProduct);
+            stats.listingProductsSeen += 1;
 
-                // Skip duplicates
-                if (product.id && seenIds.has(product.id)) continue;
-                if (product.id) seenIds.add(product.id);
+            if (!mapped.id && !mapped.url && !mapped.listing_id) continue;
 
-                // Skip invalid products
-                if (!product.title && !product.price) continue;
-
-                pendingProducts.push(product);
-                stats.productsFound += 1;
-
-                // Push batch when buffer is full
-                await pushBatch();
-            } catch (err) {
-                stats.errors += 1;
-                log.warning(`⚠️ Failed to extract product: ${err.message}`);
+            if (mapped.id && seenIds.has(mapped.id)) {
+                stats.duplicateProducts += 1;
+                continue;
             }
+
+            if (mapped.url && seenUrls.has(mapped.url)) {
+                stats.duplicateProducts += 1;
+                continue;
+            }
+
+            if (mapped.id) seenIds.add(mapped.id);
+            if (mapped.url) seenUrls.add(mapped.url);
+
+            pendingProducts.push(mapped);
+            pageUnique += 1;
+            stats.productsExtracted += 1;
+
+            await pushBatch();
         }
 
-        const currentTotal = totalPushed + pendingProducts.length;
-        log.info(`✅ Page ${page} complete. Total products: ${currentTotal}/${resultsWanted}`);
+        const prepared = totalPushed + pendingProducts.length;
+        log.info(`Page ${page} complete. Added ${pageUnique} unique products. Prepared ${prepared}/${resultsWanted}`);
 
-        // Check if we have enough
-        if (currentTotal >= resultsWanted) {
-            log.info(`🎯 Reached target of ${resultsWanted} products.`);
-            break;
+        if (prepared >= resultsWanted) break;
+
+        if (pageUnique === 0) {
+            consecutiveEmptyPages += 1;
+            if (consecutiveEmptyPages >= 2) break;
         }
 
-        // Random delay between pages for stealth
-        if (page < maxPages) {
-            const pageDelay = 1000 + Math.random() * 2000;
-            log.info(`⏳ Waiting ${Math.round(pageDelay)}ms before next page...`);
-            await sleep(pageDelay);
-        }
+        await sleep(25 + Math.random() * 80);
     }
 
-    // Push any remaining products
     await pushBatch(true);
 
+    const runtimeSec = (Date.now() - startTime) / 1000;
     const totalProducts = totalPushed;
-    const totalTime = (Date.now() - startTime) / 1000;
 
-    // Final statistics
     log.info('='.repeat(60));
-    log.info('📊 FLIPKART SCRAPER STATISTICS');
+    log.info('FLIPKART SCRAPER STATISTICS');
     log.info('='.repeat(60));
-    log.info(`✅ Products extracted: ${totalProducts}/${resultsWanted}`);
-    log.info(`📄 Pages processed: ${stats.pagesProcessed}`);
-    log.info(`⚠️  Errors: ${stats.errors}`);
-    log.info(`⏱️  Runtime: ${totalTime.toFixed(2)}s`);
-    log.info(`⚡ Speed: ${(totalProducts / totalTime).toFixed(2)} products/sec`);
+    log.info(`Products extracted: ${totalProducts}/${resultsWanted}`);
+    log.info(`Pages processed: ${stats.pagesProcessed}`);
+    log.info(`Listing products seen: ${stats.listingProductsSeen}`);
+    log.info(`Duplicates skipped: ${stats.duplicateProducts}`);
+    log.info(`Errors: ${stats.errors}`);
+    log.info(`Runtime: ${runtimeSec.toFixed(2)}s`);
+    log.info(`Speed: ${(totalProducts / Math.max(runtimeSec, 1)).toFixed(2)} products/sec`);
     log.info('='.repeat(60));
 
-    // QA validation
     if (totalProducts === 0) {
-        const errorMsg = 'No products extracted. Check if URL is valid and page structure has not changed.';
-        log.error(`❌ ${errorMsg}`);
+        const errorMsg = 'No products extracted from listing API state. Check URL, proxy, or page accessibility.';
+        log.error(errorMsg);
         await Actor.fail(errorMsg);
     } else {
-        log.info(`🎉 SUCCESS: Extracted ${totalProducts} products!`);
         await Actor.setValue('OUTPUT_SUMMARY', {
             productsExtracted: totalProducts,
             pagesProcessed: stats.pagesProcessed,
-            runtime: totalTime,
+            listingProductsSeen: stats.listingProductsSeen,
+            duplicateProducts: stats.duplicateProducts,
+            runtime: runtimeSec,
             success: true,
         });
     }
 } catch (error) {
-    log.error(`❌ CRITICAL ERROR: ${error.message}`);
+    log.error(`CRITICAL ERROR: ${error.message}`);
     log.exception(error, 'Actor failed with exception');
     await Actor.fail(`Actor failed: ${error.message}`);
 } finally {
     await Actor.exit();
 }
-

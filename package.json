@@ -1,6 +1,6 @@
 {
   "name": "flipkart-product-scraper",
-  "version": "1.0.0",
+  "version": "1.0",
   "description": "Flipkart product scraper - Extract product listings with prices, ratings, specifications and more from Flipkart.com",
   "type": "module",
   "dependencies": {
@@ -23,6 +23,6 @@
     "lint:fix": "eslint --fix",
     "test": "echo \"Error: oops, the Actor has no tests yet, sad!\" && exit 1"
   },
-  "author": "Shahid",
+  "author": "Shahid Irfan",
   "license": "ISC"
 }

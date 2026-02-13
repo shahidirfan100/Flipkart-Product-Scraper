@@ -6,28 +6,38 @@
       "title": "Overview",
       "transformation": {
         "fields": [
+          "id",
           "title",
+          "brand",
+          "category",
           "price",
-          "original_price",
           "discount_percent",
           "rating",
-          "rating_count",
+          "availability_status",
           "url"
         ]
       },
       "display": {
         "component": "table",
         "properties": {
+          "id": {
+            "label": "ID",
+            "format": "text"
+          },
           "title": {
-            "label": "Product",
+            "label": "Title",
+            "format": "text"
+          },
+          "brand": {
+            "label": "Brand",
+            "format": "text"
+          },
+          "category": {
+            "label": "Category",
             "format": "text"
           },
           "price": {
-            "label": "Price (₹)",
-            "format": "number"
-          },
-          "original_price": {
-            "label": "MRP (₹)",
+            "label": "Price",
             "format": "number"
           },
           "discount_percent": {
@@ -38,13 +48,185 @@
             "label": "Rating",
             "format": "number"
           },
-          "rating_count": {
-            "label": "Ratings",
-            "format": "number"
+          "availability_status": {
+            "label": "Availability",
+            "format": "text"
           },
           "url": {
             "label": "URL",
             "format": "link"
+          }
+        }
+      }
+    },
+    "all_fields": {
+      "title": "All Fields",
+      "transformation": {
+        "fields": [
+          "id",
+          "item_id",
+          "listing_id",
+          "title",
+          "brand",
+          "category",
+          "analytics_category",
+          "analytics_sub_category",
+          "price",
+          "price_text",
+          "original_price",
+          "original_price_text",
+          "discount_amount",
+          "discount_percent",
+          "discount_text",
+          "currency",
+          "rating",
+          "rating_count",
+          "review_count",
+          "rating_breakdown",
+          "availability_status",
+          "is_available",
+          "buyability_intent",
+          "is_flipkart_advantage",
+          "swatch_available",
+          "key_specs",
+          "specifications",
+          "warranty_summary",
+          "market_place",
+          "image_url",
+          "url",
+          "fetched_at"
+        ]
+      },
+      "display": {
+        "component": "table",
+        "properties": {
+          "id": {
+            "label": "ID",
+            "format": "text"
+          },
+          "item_id": {
+            "label": "Item ID",
+            "format": "text"
+          },
+          "listing_id": {
+            "label": "Listing ID",
+            "format": "text"
+          },
+          "title": {
+            "label": "Title",
+            "format": "text"
+          },
+          "brand": {
+            "label": "Brand",
+            "format": "text"
+          },
+          "category": {
+            "label": "Category",
+            "format": "text"
+          },
+          "analytics_category": {
+            "label": "Analytics Category",
+            "format": "text"
+          },
+          "analytics_sub_category": {
+            "label": "Analytics Sub Category",
+            "format": "text"
+          },
+          "price": {
+            "label": "Price",
+            "format": "number"
+          },
+          "price_text": {
+            "label": "Price Text",
+            "format": "text"
+          },
+          "original_price": {
+            "label": "Original Price",
+            "format": "number"
+          },
+          "original_price_text": {
+            "label": "Original Price Text",
+            "format": "text"
+          },
+          "discount_amount": {
+            "label": "Discount Amount",
+            "format": "number"
+          },
+          "discount_percent": {
+            "label": "Discount %",
+            "format": "number"
+          },
+          "discount_text": {
+            "label": "Discount Text",
+            "format": "text"
+          },
+          "currency": {
+            "label": "Currency",
+            "format": "text"
+          },
+          "rating": {
+            "label": "Rating",
+            "format": "number"
+          },
+          "rating_count": {
+            "label": "Rating Count",
+            "format": "number"
+          },
+          "review_count": {
+            "label": "Review Count",
+            "format": "number"
+          },
+          "rating_breakdown": {
+            "label": "Rating Breakdown",
+            "format": "json"
+          },
+          "availability_status": {
+            "label": "Availability Status",
+            "format": "text"
+          },
+          "is_available": {
+            "label": "Is Available",
+            "format": "boolean"
+          },
+          "buyability_intent": {
+            "label": "Buyability Intent",
+            "format": "text"
+          },
+          "is_flipkart_advantage": {
+            "label": "Flipkart Advantage",
+            "format": "boolean"
+          },
+          "swatch_available": {
+            "label": "Swatch Available",
+            "format": "boolean"
+          },
+          "key_specs": {
+            "label": "Key Specs",
+            "format": "json"
+          },
+          "specifications": {
+            "label": "Specifications",
+            "format": "json"
+          },
+          "warranty_summary": {
+            "label": "Warranty Summary",
+            "format": "text"
+          },
+          "market_place": {
+            "label": "Market Place",
+            "format": "text"
+          },
+          "image_url": {
+            "label": "Image URL",
+            "format": "link"
+          },
+          "url": {
+            "label": "URL",
+            "format": "link"
+          },
+          "fetched_at": {
+            "label": "Fetched At",
+            "format": "date"
           }
         }
       }
