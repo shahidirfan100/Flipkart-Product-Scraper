@@ -23,21 +23,15 @@
       "editor": "number"
     },
     "proxyConfiguration": {
-      "title": "Proxy Configuration",
+      "title": "Optional Proxy Configuration",
       "type": "object",
-      "description": "Proxy settings for reliable extraction.",
+      "description": "Optional proxy settings. Leave disabled unless you explicitly want to route requests through a proxy.",
       "editor": "proxy",
       "default": {
-        "useApifyProxy": true,
-        "apifyProxyGroups": [
-          "RESIDENTIAL"
-        ]
+        "useApifyProxy": false
       },
       "prefill": {
-        "useApifyProxy": true,
-        "apifyProxyGroups": [
-          "RESIDENTIAL"
-        ]
+        "useApifyProxy": false
       }
     }
   },

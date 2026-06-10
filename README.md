@@ -1,13 +1,14 @@
 # Flipkart Product Scraper
 
-Extract Flipkart product listings at scale with reliable, structured output. Collect pricing, ratings, availability, seller and offer signals, and product metadata for research, monitoring, and analytics. Built for fast collection and strict result targeting.
+Extract Flipkart product listings at scale with reliable, structured output. Collect pricing, ratings, availability, and product metadata for research, monitoring, and analytics. Built for fast collection, strict result targeting, and resilient reruns when Flipkart shifts request behavior.
 
 ## Features
 
 - **Fast collection mode** - Prioritizes speed by extracting directly from listing pages.
 - **Strict target pagination** - Continues pagination to reach your requested `results_wanted` count when products are available.
 - **Rich structured output** - Returns normalized numeric/text fields ready for analysis.
-- **Robust retries and anti-block handling** - Improves run stability across categories and search pages.
+- **Self-healing request strategy** - Tries multiple safe request profiles and normalized listing URLs before failing.
+- **Failure diagnostics** - Stores a structured diagnostic report when a page blocks or stops exposing listing products.
 
 ## Use Cases
 
@@ -18,10 +19,10 @@ Track selling price, original price, and discount changes across categories. Use
 Build product datasets with IDs, listings, brand/category metadata, and key specs. Useful for product benchmarking and catalog enrichment.
 
 ### Seller and Availability Tracking
-Capture listing availability, serviceability flags, seller identifiers, and offer volume indicators. Helpful for operational market monitoring.
+Capture listing availability and buyability indicators. Helpful for operational market monitoring.
 
 ### Competitive Analysis
-Compare rating volume, review volume, and offer intensity across similar products. Identify fast-moving and high-engagement listings.
+Compare rating volume and review volume across similar products. Identify fast-moving and high-engagement listings.
 
 ---
 
@@ -41,7 +42,7 @@ Each dataset item may contain:
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | String | Product identifier. |
+| `id` | String\|Null | Product identifier. |
 | `item_id` | String\|Null | Item identifier if available. |
 | `listing_id` | String\|Null | Listing identifier. |
 | `title` | String\|Null | Product title. |
@@ -63,21 +64,12 @@ Each dataset item may contain:
 | `warranty_summary` | String\|Null | Warranty summary text. |
 | `availability_status` | String\|Null | Availability state. |
 | `is_available` | Boolean\|Null | Availability flag. |
-| `unserviceability_reason` | String\|Null | Serviceability reason when unavailable. |
-| `is_serviceable` | Boolean\|Null | Serviceability flag. |
-| `is_prebook` | Boolean\|Null | Pre-book flag. |
-| `is_fa` | Boolean\|Null | Flipkart Assured style flag when available. |
-| `is_fbf` | Boolean\|Null | Fulfillment flag when available. |
-| `is_gst_billing_available` | Boolean\|Null | GST billing availability flag. |
-| `seller_id` | String\|Null | Seller identifier. |
-| `seller_count` | Number\|Null | Seller count signal. |
-| `seller_rating` | Number\|Null | Seller rating signal. |
-| `cod_available` | Boolean\|Null | Cash-on-delivery availability flag. |
-| `offer_count` | Number\|Null | Total offers count signal. |
-| `offer_types` | String[]\|Null | Offer type labels. |
+| `buyability_intent` | String\|Null | Buyability intent exposed by the listing state. |
+| `is_flipkart_advantage` | Boolean\|Null | Flipkart advantage style flag when present. |
+| `swatch_available` | Boolean\|Null | Indicates whether listing swatches are available. |
 | `currency` | String\|Null | Currency code. |
-| `item_condition` | String\|Null | Item condition label. |
-| `shipping_charge` | Number\|Null | Shipping charge when available. |
+| `analytics_category` | String\|Null | Analytics category label from Flipkart state. |
+| `analytics_sub_category` | String\|Null | Analytics sub-category label from Flipkart state. |
 | `market_place` | String\|Null | Marketplace label. |
 | `image_url` | String\|Null | Product image URL. |
 | `url` | String\|Null | Product URL. |
@@ -138,10 +130,12 @@ Use default fast mode for maximum speed.
   },
   "availability_status": "IN_STOCK",
   "is_available": true,
-  "seller_id": "f18a539fe5824fe4",
-  "offer_count": 16,
-  "offer_types": ["BASKETPRICE_PAYMENT_DISCOUNT", "LISTING_NONE_DISCOUNT"],
+  "buyability_intent": "POSITIVE",
+  "is_flipkart_advantage": true,
+  "swatch_available": false,
   "currency": "INR",
+  "analytics_category": "ComputerComponents",
+  "analytics_sub_category": "Monitors",
   "image_url": "https://rukmini1.flixcart.com/image/1500/1500/xif0q/monitor/l/v/a/mon-0079c-full-hd-22-2024-mon-0079c-frontech-original-imahkm4mftzgg96g.jpeg?q=70",
   "url": "https://www.flipkart.com/...",
   "fetched_at": "2026-02-13T06:57:02.015Z"
@@ -198,6 +192,9 @@ Yes. Some fields depend on what each listing exposes, so certain attributes may 
 
 ### Why are some fields null?
 Some products or listings do not expose every field consistently. Null values are expected in such cases.
+
+### What happens if Flipkart changes request behavior?
+The actor retries with alternative request fingerprints and stores structured diagnostics if a page blocks or stops returning listing products.
 
 ### Can I scrape search URLs and category URLs?
 Yes. Both are supported as long as they return product listing pages.

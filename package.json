@@ -4,13 +4,13 @@
   "description": "Flipkart product scraper - Extract product listings with prices, ratings, specifications and more from Flipkart.com",
   "type": "module",
   "dependencies": {
-    "apify": "^3.5.2",
-    "crawlee": "^3.15.3",
-    "cheerio": "^1.0.0-rc.12",
-    "got-scraping": "^4.1.2"
+    "apify": "^3.7.2",
+    "crawlee": "^3.16.0",
+    "cheerio": "^1.2.0",
+    "got-scraping": "^4.2.1"
   },
   "devDependencies": {
-    "@apify/eslint-config": "^1.0.0",
+    "@apify/eslint-config": "^2.0.0",
     "eslint": "^9.29.0",
     "eslint-config-prettier": "^10.1.5",
     "prettier": "^3.5.3"

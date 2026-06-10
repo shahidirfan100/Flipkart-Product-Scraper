@@ -1,36 +1,70 @@
-// Flipkart Product Scraper - listing API/state extraction only (no product page visits)
+// Flipkart Product Scraper - listing state extraction with failure diagnostics
+import { readFile } from 'node:fs/promises';
+
 import { Actor, log } from 'apify';
 import { Dataset, gotScraping, sleep } from 'crawlee';
 
-const USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+const DISCOVERY_FILE = 'API_DISCOVERY.md';
+const DEFAULT_RESULTS_WANTED = 20;
+const BLOCK_TITLE_PATTERNS = ['access denied', 'captcha', 'flipkart recaptcha', 'robot check', 'unusual activity'];
+
+const REQUEST_PROFILES = [
+    {
+        id: 'firefox-desktop',
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:147.0) Gecko/20100101 Firefox/147.0',
+            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Cache-Control': 'no-cache',
+            Pragma: 'no-cache',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-site',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
+            Connection: 'keep-alive',
+        },
+    },
+    {
+        id: 'chrome-desktop',
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
+            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Cache-Control': 'no-cache',
+            Pragma: 'no-cache',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="137", "Google Chrome";v="137"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
+            Connection: 'keep-alive',
+        },
+    },
+    {
+        id: 'firefox-india',
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0',
+            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-IN,en-US;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Cache-Control': 'no-cache',
+            Pragma: 'no-cache',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-site',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
+            Referer: 'https://www.flipkart.com/',
+            Connection: 'keep-alive',
+        },
+    },
 ];
-
-const BLOCK_TITLE_PATTERNS = ['access denied', 'captcha', 'robot check', 'unusual activity'];
-
-const getRandomUserAgent = () => USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
-
-const getStealthHeaders = () => ({
-    'User-Agent': getRandomUserAgent(),
-    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Cache-Control': 'no-cache',
-    Pragma: 'no-cache',
-    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="122", "Google Chrome";v="122"',
-    'Sec-Ch-Ua-Mobile': '?0',
-    'Sec-Ch-Ua-Platform': '"Windows"',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'none',
-    'Sec-Fetch-User': '?1',
-    'Upgrade-Insecure-Requests': '1',
-    Connection: 'keep-alive',
-});
 
 const requestWithRetry = async (fn, context, maxRetries = 3) => {
     let attempt = 0;
@@ -61,9 +95,72 @@ const requestWithRetry = async (fn, context, maxRetries = 3) => {
 const pickProxyUrl = async (proxyConfiguration) =>
     proxyConfiguration ? proxyConfiguration.newUrl() : undefined;
 
+const normalizeFlipkartUrl = (rawUrl) => {
+    const url = new URL(rawUrl.trim());
+    url.hash = '';
+    if (!url.protocol.startsWith('http')) url.protocol = 'https:';
+    url.searchParams.delete('otracker');
+    url.searchParams.delete('otracker1');
+    url.searchParams.delete('marketplace');
+    url.searchParams.set('marketplace', 'FLIPKART');
+    return url;
+};
+
+const getUrlType = (rawUrl) => {
+    try {
+        const url = new URL(rawUrl);
+        if (url.pathname.startsWith('/search')) return 'search';
+        if (url.pathname.includes('/brand/')) return 'brand';
+        if (url.searchParams.has('sid')) return 'category';
+        if (url.pathname.includes('/tag/')) return 'tag';
+        if (/\/pr\/?$/i.test(url.pathname)) return 'listing';
+        return 'listing';
+    } catch {
+        return 'listing';
+    }
+};
+
 const buildPageUrl = (baseUrl, page) => {
-    const url = new URL(baseUrl);
+    const url = normalizeFlipkartUrl(baseUrl);
     if (page > 1) url.searchParams.set('page', String(page));
+    else url.searchParams.delete('page');
+    return url.href;
+};
+
+const buildFallbackUrls = (rawUrl) => {
+    const seen = new Set();
+    const candidates = [];
+
+    const add = (value) => {
+        if (!value || seen.has(value)) return;
+        seen.add(value);
+        candidates.push(value);
+    };
+
+    const base = normalizeFlipkartUrl(rawUrl);
+    base.searchParams.delete('page');
+    add(base.href);
+
+    const normalized = new URL(base.href);
+    if (normalized.pathname.includes('/monitors/pr') && !normalized.pathname.includes('/monitors-accessories/monitors/pr')) {
+        normalized.pathname = normalized.pathname.replace('/monitors/pr', '/monitors-accessories/monitors/pr');
+        add(normalized.href);
+    }
+
+    const withoutMarketplace = new URL(base.href);
+    withoutMarketplace.searchParams.delete('marketplace');
+    add(withoutMarketplace.href);
+
+    const trimmedPath = new URL(base.href);
+    trimmedPath.pathname = trimmedPath.pathname.replace(/\/+$/, '') || '/';
+    add(trimmedPath.href);
+
+    return candidates;
+};
+
+const getPaginationBaseUrl = (rawUrl) => {
+    const url = normalizeFlipkartUrl(rawUrl);
+    url.searchParams.delete('page');
     return url.href;
 };
 
@@ -161,6 +258,33 @@ const ensureAbsoluteUrl = (rawUrl) => {
     }
 };
 
+const normalizeProductUrlForKey = (rawUrl) => {
+    const absolute = ensureAbsoluteUrl(rawUrl);
+    if (!absolute) return null;
+
+    try {
+        const url = new URL(absolute);
+        const preservedParams = ['pid', 'lid', 'marketplace'];
+        const nextParams = new URLSearchParams();
+        for (const key of preservedParams) {
+            const value = url.searchParams.get(key);
+            if (value) nextParams.set(key, value);
+        }
+        url.search = nextParams.toString();
+        url.hash = '';
+        return url.href;
+    } catch {
+        return absolute;
+    }
+};
+
+const buildStableProductKey = (item) =>
+    item.listing_id
+    || item.item_id
+    || normalizeProductUrlForKey(item.url)
+    || item.id
+    || null;
+
 const extractItemIdFromUrl = (rawUrl) => {
     const absolute = ensureAbsoluteUrl(rawUrl);
     if (!absolute) return null;
@@ -176,11 +300,6 @@ const getUrlQueryParam = (rawUrl, key) => {
     } catch {
         return null;
     }
-};
-
-const isLikelyBlocked = (html = '') => {
-    const title = html.match(/<title>([\s\S]*?)<\/title>/i)?.[1]?.trim().toLowerCase() || '';
-    return BLOCK_TITLE_PATTERNS.some((pattern) => title.includes(pattern));
 };
 
 const extractBalancedJsonObject = (text, startIndex) => {
@@ -235,7 +354,299 @@ const parseInitialStateFromHtml = (html) => {
     }
 };
 
-const findStateListingProducts = (state) => {
+const parseJsonLdFromHtml = (html) => {
+    const matches = [...html.matchAll(/<script[^>]+type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi)];
+    const payloads = [];
+
+    for (const match of matches) {
+        try {
+            payloads.push(JSON.parse(match[1]));
+        } catch (error) {
+            log.warning(`Failed to parse JSON-LD payload: ${error.message}`);
+        }
+    }
+
+    return payloads;
+};
+
+const isLikelyBlocked = (html = '') => {
+    const title = html.match(/<title>([\s\S]*?)<\/title>/i)?.[1]?.trim().toLowerCase() || '';
+    return BLOCK_TITLE_PATTERNS.some((pattern) => title.includes(pattern));
+};
+
+const summarizeHtml = (html, requestProfileId, url, response) => ({
+    requestProfileId,
+    url,
+    finalUrl: response?.url || url,
+    statusCode: response?.statusCode ?? null,
+    bodyLength: html.length,
+    title: html.match(/<title>([\s\S]*?)<\/title>/i)?.[1]?.trim() || null,
+    hasInitialState: html.includes('window.__INITIAL_STATE__'),
+    hasNextData: html.includes('__NEXT_DATA__'),
+    jsonLdCount: (html.match(/application\/ld\+json/gi) || []).length,
+    blocked: isLikelyBlocked(html),
+});
+
+const extractNextPageUrlFromHtml = (html, currentUrl) => {
+    const patterns = [
+        /"nextUrl":"([^"]+)"/i,
+        /<link[^>]+rel="next"[^>]+href="([^"]+)"/i,
+        /<a[^>]+href="([^"]*?[?&]page=\d+[^"]*)"[^>]*>\s*Next/i,
+    ];
+
+    for (const pattern of patterns) {
+        const match = html.match(pattern);
+        if (!match?.[1]) continue;
+        const normalized = match[1].replace(/\\u0026/g, '&').replace(/\\/g, '');
+        try {
+            return new URL(normalized, currentUrl || 'https://www.flipkart.com').href;
+        } catch {
+            continue;
+        }
+    }
+
+    return null;
+};
+
+const getSidSignature = (rawUrl) => {
+    try {
+        const url = new URL(rawUrl, 'https://www.flipkart.com');
+        return url.searchParams.get('sid');
+    } catch {
+        return null;
+    }
+};
+
+const extractStablePaginationBaseUrl = (html, currentUrl) => {
+    const currentSid = getSidSignature(currentUrl);
+    const matches = [
+        ...html.matchAll(/href="([^"]*\/pr\?sid=[^"]*page=\d+[^"]*)"/g),
+        ...html.matchAll(/(\/[^"'\\s<]*~cs-[^"'\\s<]*\/pr\?sid=[^"'\\s<]*page=\d+[^"'\\s<]*)/g),
+    ].map((match) => match[1].replace(/&amp;/g, '&').replace(/\\u0026/g, '&'));
+
+    const candidates = [...new Set(matches)]
+        .map((candidate) => ensureAbsoluteUrl(candidate))
+        .filter(Boolean)
+        .filter((candidate) => !currentSid || getSidSignature(candidate) === currentSid)
+        .sort((a, b) => {
+            const aOsp = a.includes('/osp/');
+            const bOsp = b.includes('/osp/');
+            if (aOsp !== bOsp) return Number(aOsp) - Number(bOsp);
+            return a.length - b.length;
+        });
+
+    const best = candidates[0];
+    if (!best) return null;
+
+    try {
+        const url = new URL(best);
+        url.searchParams.delete('page');
+        return url.href;
+    } catch {
+        return best;
+    }
+};
+
+const getPageDataBuckets = (state) => {
+    const pageData = state?.pageDataV4?.page?.data;
+    if (!pageData || typeof pageData !== 'object') return [];
+
+    return Object.entries(pageData)
+        .filter(([, value]) => Array.isArray(value))
+        .map(([bucketKey, entries]) => ({ bucketKey, entries }));
+};
+
+const pickPrimaryListingBucket = (state) => {
+    const buckets = getPageDataBuckets(state);
+    const candidates = buckets.map(({ bucketKey, entries }) => {
+        const productWidgets = entries.filter((entry) => Array.isArray(entry?.widget?.data?.products));
+        const productCount = productWidgets.reduce((sum, entry) => sum + entry.widget.data.products.length, 0);
+        const pagerEntry = entries.find((entry) =>
+            entry?.widget?.data?.navigationPages
+            || entry?.widget?.data?.totalPages
+            || entry?.widget?.data?.currentPage
+        );
+
+        return {
+            bucketKey,
+            entries,
+            productWidgets,
+            productCount,
+            pagerEntry,
+            hasPager: Boolean(pagerEntry),
+        };
+    }).filter((candidate) => candidate.productWidgets.length > 0);
+
+    candidates.sort((a, b) => {
+        if (a.hasPager !== b.hasPager) return Number(b.hasPager) - Number(a.hasPager);
+        return b.productCount - a.productCount;
+    });
+
+    return candidates[0] || null;
+};
+
+const getPaginationState = (state, html, currentUrl) => {
+    const primaryBucket = pickPrimaryListingBucket(state);
+    const pagerData = primaryBucket?.pagerEntry?.widget?.data || {};
+    const browseMetadata = state?.browseMetadata || {};
+    const pageData = state?.pageDataV4?.page?.pageData || {};
+    const currentPage = toNumber(pagerData.currentPage) ?? toNumber(state?.pageDataV4?.page?.pageNumber) ?? 1;
+    const navigationPages = Array.isArray(pagerData.navigationPages) ? pagerData.navigationPages : [];
+    const nextNavigation = navigationPages.find((entry) => toNumber(entry?.number) === currentPage + 1);
+    const nextFromPager = nextNavigation?.param
+        ? (() => {
+            try {
+                const nextUrl = new URL(currentUrl || 'https://www.flipkart.com');
+                const paramUrl = new URLSearchParams(nextNavigation.param);
+                for (const [key, value] of paramUrl.entries()) {
+                    nextUrl.searchParams.set(key, value);
+                }
+                return nextUrl.href;
+            } catch {
+                return null;
+            }
+        })()
+        : null;
+    const nextUrl = ensureAbsoluteUrl(browseMetadata?.seoPagination?.nextUrl)
+        || nextFromPager
+        || extractNextPageUrlFromHtml(html || '', currentUrl);
+
+    return {
+        currentPage,
+        totalPages: toNumber(pagerData.totalPages),
+        totalProducts: toNumber(browseMetadata.totalProducts)
+            ?? toNumber(state?.pageDataV4?.page?.data?.['10004']?.[0]?.widget?.data?.totalProducts)
+            ?? toNumber(pageData?.pageContext?.productCount),
+        nextUrl,
+        hasMorePages: pageData?.hasMorePages === true,
+        isInfinitePage: pageData?.infinitePage === true,
+        primaryBucketKey: primaryBucket?.bucketKey || null,
+        primaryWidgetCount: primaryBucket?.productWidgets?.length || 0,
+    };
+};
+
+const readApiDiscovery = async () => {
+    try {
+        const content = await readFile(new URL(`../${DISCOVERY_FILE}`, import.meta.url), 'utf8');
+        const selectedApiLine = content.split('\n').find((line) => line.startsWith('- Endpoint:')) || null;
+    return {
+            available: true,
+            path: DISCOVERY_FILE,
+            selectedApiLine,
+        };
+    } catch (error) {
+        return {
+            available: false,
+            path: DISCOVERY_FILE,
+            error: error.message,
+        };
+    }
+};
+
+const readLocalInputFallback = async () => {
+    try {
+        const content = await readFile(new URL('../INPUT.json', import.meta.url), 'utf8');
+        const parsed = JSON.parse(content);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+        return {};
+    }
+};
+
+const fetchHtmlWithProfile = async (url, proxyConfiguration, requestProfile, options = {}) =>
+    requestWithRetry(
+        async () => {
+            const {
+                minDelayMs = 20,
+                maxDelayMs = 90,
+                timeoutMs = 20000,
+            } = options;
+
+            await sleep(minDelayMs + Math.random() * Math.max(0, maxDelayMs - minDelayMs));
+
+            const response = await gotScraping({
+                url,
+                headers: requestProfile.headers,
+                responseType: 'text',
+                proxyUrl: await pickProxyUrl(proxyConfiguration),
+                timeout: { request: timeoutMs },
+                throwHttpErrors: false,
+                followRedirect: true,
+                retry: { limit: 0 },
+            });
+
+            const html = response.body || '';
+            const summary = summarizeHtml(html, requestProfile.id, url, response);
+
+            if (response.statusCode >= 400) {
+                const error = new Error(`HTTP ${response.statusCode} for ${url}`);
+                error.summary = summary;
+                throw error;
+            }
+
+            if (!html || html.length < 800) {
+                const error = new Error(`Unexpectedly short response for ${url}`);
+                error.summary = summary;
+                throw error;
+            }
+
+            if (summary.blocked) {
+                const error = new Error(`Likely blocked page content for ${url}`);
+                error.summary = summary;
+                throw error;
+            }
+
+            return { html, response, summary };
+        },
+        `Fetch page with profile ${requestProfile.id}`,
+        options.maxRetries ?? 2
+    );
+
+const getTransportStrategies = (proxyConfiguration) => {
+    if (!proxyConfiguration) return [{ id: 'direct', proxyConfiguration: undefined }];
+    return [
+        { id: 'proxy', proxyConfiguration },
+        { id: 'direct-fallback', proxyConfiguration: undefined },
+    ];
+};
+
+const fetchListingHtml = async (rawUrl, proxyConfiguration, options = {}) => {
+    const candidates = buildFallbackUrls(rawUrl);
+    const failures = [];
+    const strategies = getTransportStrategies(proxyConfiguration);
+
+    for (const url of candidates) {
+        for (const strategy of strategies) {
+            for (const requestProfile of REQUEST_PROFILES) {
+                try {
+                    const result = await fetchHtmlWithProfile(url, strategy.proxyConfiguration, requestProfile, options);
+                    if (failures.length > 0) {
+                        log.info(`Recovered using ${strategy.id} transport and ${requestProfile.id} profile.`);
+                    }
+                    return {
+                        ...result,
+                        failures,
+                        transportId: strategy.id,
+                    };
+                } catch (error) {
+                    failures.push({
+                        transportId: strategy.id,
+                        url,
+                        requestProfileId: requestProfile.id,
+                        message: error.message,
+                        summary: error.summary || null,
+                    });
+                }
+            }
+        }
+    }
+
+    const finalError = new Error(`All request profiles failed for ${rawUrl}`);
+    finalError.failures = failures;
+    throw finalError;
+};
+
+const findRecursiveListingProducts = (state) => {
     const products = [];
     const visited = new WeakSet();
 
@@ -257,13 +668,26 @@ const findStateListingProducts = (state) => {
             }
         }
 
+        if (node.productInfo?.value?.id || node.productInfo?.action?.url) {
+            products.push(node);
+        }
+
         for (const value of Object.values(node)) {
             walk(value);
         }
     };
 
-    walk(state?.pageDataV4?.page?.data);
+    walk(state);
     return products;
+};
+
+const findStateListingProducts = (state) => {
+    const primaryBucket = pickPrimaryListingBucket(state);
+    if (primaryBucket) {
+        return primaryBucket.productWidgets.flatMap((entry) => entry.widget.data.products || []);
+    }
+
+    return findRecursiveListingProducts(state);
 };
 
 const getListingPrices = (value) => {
@@ -401,75 +825,170 @@ const mapListingProduct = (product) => {
     };
 };
 
-const fetchHtml = async (url, proxyConfiguration, options = {}) =>
-    requestWithRetry(
-        async () => {
-            const {
-                minDelayMs = 20,
-                maxDelayMs = 90,
-                timeoutMs = 20000,
-            } = options;
+const extractProductsFromJsonLd = (payloads) => {
+    const products = [];
 
-            await sleep(minDelayMs + Math.random() * Math.max(0, maxDelayMs - minDelayMs));
-
-            const response = await gotScraping({
-                url,
-                headers: getStealthHeaders(),
-                responseType: 'text',
-                proxyUrl: await pickProxyUrl(proxyConfiguration),
-                timeout: { request: timeoutMs },
-                throwHttpErrors: false,
-                followRedirect: true,
-                retry: { limit: 0 },
+    for (const payload of payloads) {
+        const items = Array.isArray(payload?.itemListElement) ? payload.itemListElement : [];
+        for (const item of items) {
+            const product = item?.item;
+            if (!product) continue;
+            products.push({
+                id: asText(product['@id']) || asText(product.sku),
+                item_id: asText(product.sku),
+                listing_id: null,
+                title: asText(product.name),
+                brand: asText(product.brand?.name || product.brand),
+                category: null,
+                price: toNumber(product.offers?.price),
+                price_text: formatInr(toNumber(product.offers?.price)),
+                original_price: null,
+                original_price_text: null,
+                discount_percent: null,
+                discount_amount: null,
+                discount_text: null,
+                rating: toNumber(product.aggregateRating?.ratingValue),
+                rating_count: toNumber(product.aggregateRating?.ratingCount),
+                review_count: toNumber(product.aggregateRating?.reviewCount),
+                rating_breakdown: null,
+                specifications: null,
+                key_specs: null,
+                warranty_summary: null,
+                availability_status: normalizeAvailability(product.offers?.availability),
+                is_available: null,
+                buyability_intent: null,
+                is_flipkart_advantage: null,
+                swatch_available: null,
+                currency: asText(product.offers?.priceCurrency) || 'INR',
+                analytics_category: null,
+                analytics_sub_category: null,
+                market_place: 'FLIPKART',
+                image_url: sanitizeImageUrl(Array.isArray(product.image) ? product.image[0] : product.image),
+                url: ensureAbsoluteUrl(product.url),
+                fetched_at: new Date().toISOString(),
             });
+        }
+    }
 
-            if (response.statusCode >= 400) {
-                throw new Error(`HTTP ${response.statusCode} for ${url}`);
+    return products;
+};
+
+const dedupeProducts = (items) => {
+    const seen = new Set();
+    const unique = [];
+
+    for (const item of items) {
+        const key = buildStableProductKey(item);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        unique.push(item);
+    }
+
+    return unique;
+};
+
+const diagnoseListingFailure = async ({
+    discoveryInfo,
+    rawUrl,
+    proxyConfiguration,
+    error,
+    page,
+}) => {
+    const diagnostics = {
+        at: new Date().toISOString(),
+        page,
+        rawUrl,
+        discoveryInfo,
+        errorMessage: error.message,
+        fetchFailures: error.failures || [],
+        probes: [],
+    };
+
+    if (discoveryInfo.available) {
+        log.info('Running API-backed diagnostics.');
+    } else {
+        log.warning('Running fallback diagnostics without discovery context.');
+    }
+
+    for (const candidateUrl of buildFallbackUrls(rawUrl)) {
+        for (const strategy of getTransportStrategies(proxyConfiguration)) {
+            for (const requestProfile of REQUEST_PROFILES) {
+                try {
+                    const response = await gotScraping({
+                        url: candidateUrl,
+                        headers: requestProfile.headers,
+                        responseType: 'text',
+                        proxyUrl: await pickProxyUrl(strategy.proxyConfiguration),
+                        timeout: { request: 15000 },
+                        throwHttpErrors: false,
+                        followRedirect: true,
+                        retry: { limit: 0 },
+                    });
+                    const html = response.body || '';
+                    diagnostics.probes.push({
+                        transportId: strategy.id,
+                        ...summarizeHtml(html, requestProfile.id, candidateUrl, response),
+                    });
+                } catch (probeError) {
+                    diagnostics.probes.push({
+                        transportId: strategy.id,
+                        requestProfileId: requestProfile.id,
+                        url: candidateUrl,
+                        error: probeError.message,
+                    });
+                }
             }
+        }
+    }
 
-            const html = response.body || '';
-            if (!html || html.length < 800) {
-                throw new Error(`Unexpectedly short response for ${url}`);
-            }
+    await Actor.setValue('LATEST_FAILURE_DIAGNOSTICS', diagnostics);
+    const firstSuccessLike = diagnostics.probes.find((probe) => probe.hasInitialState || probe.jsonLdCount);
+    if (firstSuccessLike) {
+        log.warning(`Diagnostics found recoverable content via ${firstSuccessLike.transportId}/${firstSuccessLike.requestProfileId}.`);
+    }
 
-            if (isLikelyBlocked(html)) {
-                throw new Error(`Likely blocked page content for ${url}`);
-            }
-
-            return html;
-        },
-        `Fetch ${url}`,
-        options.maxRetries ?? 2
-    );
+    return diagnostics;
+};
 
 await Actor.init();
 
 try {
-    const input = (await Actor.getInput()) || {};
+    const actorInput = (await Actor.getInput()) || {};
+    const input = Object.keys(actorInput).length > 0 ? actorInput : await readLocalInputFallback();
     const {
-        startUrl = 'https://www.flipkart.com/computers/computer-components/monitors/pr?sid=6bo,g0i,9no&marketplace=FLIPKART',
-        results_wanted: resultsWantedRaw = 20,
+        startUrl,
+        results_wanted: resultsWantedRaw = DEFAULT_RESULTS_WANTED,
         proxyConfiguration,
     } = input;
 
-    const resultsWanted = Number.isFinite(+resultsWantedRaw) ? Math.max(1, +resultsWantedRaw) : 20;
+    if (!startUrl) {
+        throw new Error('Missing required input: startUrl. Provide a Flipkart listing or search URL.');
+    }
+
+    const resultsWanted = Number.isFinite(+resultsWantedRaw) ? Math.max(1, +resultsWantedRaw) : DEFAULT_RESULTS_WANTED;
     const productsPerPageEstimate = 40;
     const maxPages = Math.ceil(resultsWanted / productsPerPageEstimate) + 6;
     const batchSize = 40;
     const maxRuntimeMs = 4 * 60 * 1000;
 
-    const proxyConf = proxyConfiguration
+    const shouldUseProxy = proxyConfiguration?.useApifyProxy === true || Array.isArray(proxyConfiguration?.proxyUrls);
+    const proxyConf = shouldUseProxy
         ? await Actor.createProxyConfiguration({ ...proxyConfiguration })
         : undefined;
 
-    log.info('Starting Flipkart Product Scraper (listing API/state only)');
-    log.info(`Target URL: ${startUrl}`);
-    log.info(`Requested products: ${resultsWanted}`);
-    log.info('Mode: fast listing only (no product detail page visits)');
+    const discoveryInfo = await readApiDiscovery();
+    const inputUrlType = getUrlType(startUrl);
 
-    const seenIds = new Set();
-    const seenUrls = new Set();
+    log.info('Starting Flipkart Product Scraper (listing state only)');
+    log.info(`Input type: ${inputUrlType}`);
+    log.info(`Requested products: ${resultsWanted}`);
+    log.info(`Transport preference: ${proxyConf ? 'proxy-first with direct fallback' : 'direct'}`);
+
+    const seenProductKeys = new Set();
     const pendingProducts = [];
+    let paginationBaseUrl = getPaginationBaseUrl(startUrl);
+    let nextPageUrl = paginationBaseUrl;
+    let preferStablePageParamPagination = false;
 
     const startTime = Date.now();
     let totalPushed = 0;
@@ -480,8 +999,12 @@ try {
         listingProductsSeen: 0,
         productsExtracted: 0,
         duplicateProducts: 0,
+        duplicateProductsAcrossPages: 0,
         errors: 0,
+        diagnosticsTriggered: 0,
     };
+    let consecutiveNoGrowthPages = 0;
+    let consecutiveLowYieldPages = 0;
 
     const pushBatch = async (force = false) => {
         if (pendingProducts.length >= batchSize || (force && pendingProducts.length > 0)) {
@@ -498,33 +1021,76 @@ try {
             break;
         }
 
-        const pageUrl = buildPageUrl(startUrl, page);
-        log.info(`Fetching listing page ${page}: ${pageUrl}`);
+        const pageUrl = nextPageUrl || buildPageUrl(paginationBaseUrl, page);
+        log.info(`Fetching page ${page}`);
 
         let listingHtml;
+        let requestSummary;
+        let responseUrl;
         try {
-            listingHtml = await fetchHtml(pageUrl, proxyConf, {
+            const fetchResult = await fetchListingHtml(pageUrl, proxyConf, {
                 minDelayMs: 20,
                 maxDelayMs: 90,
                 timeoutMs: 20000,
                 maxRetries: 2,
             });
+            listingHtml = fetchResult.html;
+            requestSummary = fetchResult.summary;
+            responseUrl = fetchResult.response.url || pageUrl;
+            paginationBaseUrl = getPaginationBaseUrl(fetchResult.response.url || pageUrl);
             stats.pagesProcessed += 1;
+            log.info(`Fetched page ${page} with ${fetchResult.transportId}/${requestSummary.requestProfileId} (${requestSummary.statusCode})`);
         } catch (error) {
             stats.errors += 1;
+            stats.diagnosticsTriggered += 1;
             log.error(`Failed to fetch listing page ${page}: ${error.message}`);
+            await diagnoseListingFailure({
+                discoveryInfo,
+                rawUrl: pageUrl,
+                proxyConfiguration: proxyConf,
+                error,
+                page,
+            });
             if (page === 1) throw new Error(`Failed to fetch first page: ${error.message}`);
             continue;
         }
 
         const listingState = parseInitialStateFromHtml(listingHtml);
         const stateProducts = listingState ? findStateListingProducts(listingState) : [];
-        log.info(`Found ${stateProducts.length} products in listing state on page ${page}`);
+        const jsonLdProducts = stateProducts.length === 0 ? extractProductsFromJsonLd(parseJsonLdFromHtml(listingHtml)) : [];
+        const paginationState = listingState ? getPaginationState(listingState, listingHtml, responseUrl || pageUrl) : null;
 
-        if (stateProducts.length === 0) {
+        if (page === 1) {
+            const stablePaginationBaseUrl = extractStablePaginationBaseUrl(listingHtml, responseUrl || pageUrl);
+            if (stablePaginationBaseUrl && stablePaginationBaseUrl !== paginationBaseUrl) {
+                paginationBaseUrl = stablePaginationBaseUrl;
+                nextPageUrl = buildPageUrl(paginationBaseUrl, 2);
+                preferStablePageParamPagination = true;
+                log.info('Using canonical pagination base discovered from page links.');
+            } else if ((responseUrl || pageUrl).includes('/osp/')) {
+                preferStablePageParamPagination = true;
+            }
+        }
+
+        log.info(`Found ${stateProducts.length} products in listing state on page ${page}`);
+        if (paginationState?.totalProducts && page === 1) {
+            log.info(`Catalog reports ${paginationState.totalProducts} products across ${paginationState.totalPages || '?'} pages.`);
+        }
+        if (jsonLdProducts.length > 0) {
+            log.info(`JSON-LD fallback exposed ${jsonLdProducts.length} products on page ${page}`);
+        }
+
+        if (stateProducts.length === 0 && jsonLdProducts.length === 0) {
             consecutiveEmptyPages += 1;
-            const debugTitle = listingHtml.match(/<title>([\s\S]*?)<\/title>/i)?.[1] || 'unknown';
-            log.warning(`No listing products found in state JSON. Title: ${debugTitle}`);
+            stats.diagnosticsTriggered += 1;
+            log.warning(`No listing products found on page ${page}. Triggering diagnostics.`);
+            await diagnoseListingFailure({
+                discoveryInfo,
+                rawUrl: pageUrl,
+                proxyConfiguration: proxyConf,
+                error: new Error('No listing products found in state or JSON-LD'),
+                page,
+            });
             if (page === 1) {
                 await Actor.setValue('debug-listing-html', listingHtml, { contentType: 'text/html' });
             }
@@ -534,27 +1100,29 @@ try {
 
         consecutiveEmptyPages = 0;
 
+        const mappedProducts = dedupeProducts([
+            ...stateProducts.map((product) => mapListingProduct(product)),
+            ...jsonLdProducts,
+        ]);
+
         let pageUnique = 0;
-        for (const stateProduct of stateProducts) {
+        for (const mapped of mappedProducts) {
             if ((totalPushed + pendingProducts.length) >= resultsWanted) break;
 
-            const mapped = mapListingProduct(stateProduct);
             stats.listingProductsSeen += 1;
 
             if (!mapped.id && !mapped.url && !mapped.listing_id) continue;
 
-            if (mapped.id && seenIds.has(mapped.id)) {
+            const stableKey = buildStableProductKey(mapped);
+            if (!stableKey) continue;
+
+            if (seenProductKeys.has(stableKey)) {
                 stats.duplicateProducts += 1;
+                stats.duplicateProductsAcrossPages += 1;
                 continue;
             }
 
-            if (mapped.url && seenUrls.has(mapped.url)) {
-                stats.duplicateProducts += 1;
-                continue;
-            }
-
-            if (mapped.id) seenIds.add(mapped.id);
-            if (mapped.url) seenUrls.add(mapped.url);
+            seenProductKeys.add(stableKey);
 
             pendingProducts.push(mapped);
             pageUnique += 1;
@@ -566,11 +1134,47 @@ try {
         const prepared = totalPushed + pendingProducts.length;
         log.info(`Page ${page} complete. Added ${pageUnique} unique products. Prepared ${prepared}/${resultsWanted}`);
 
+        const nextUrlDriftsStore = paginationState?.nextUrl
+            && getSidSignature(paginationState.nextUrl)
+            && getSidSignature(paginationBaseUrl)
+            && getSidSignature(paginationState.nextUrl) !== getSidSignature(paginationBaseUrl);
+
+        if (!preferStablePageParamPagination && paginationState?.nextUrl && !nextUrlDriftsStore) {
+            nextPageUrl = paginationState.nextUrl;
+        } else if (paginationState?.hasMorePages === false) {
+            nextPageUrl = null;
+        } else {
+            nextPageUrl = buildPageUrl(paginationBaseUrl, page + 1);
+        }
+
+        if (pageUnique === 0) consecutiveNoGrowthPages += 1;
+        else consecutiveNoGrowthPages = 0;
+
+        const lowYieldThreshold = inputUrlType === 'search' ? 3 : 2;
+        if (pageUnique <= lowYieldThreshold) consecutiveLowYieldPages += 1;
+        else consecutiveLowYieldPages = 0;
+
         if (prepared >= resultsWanted) break;
+        if (!nextPageUrl) {
+            log.info('Stopping because the page does not expose a next pagination URL.');
+            break;
+        }
+
+        const noGrowthStopThreshold = paginationState?.totalPages && paginationState.totalPages > 6 ? 4 : 2;
 
         if (pageUnique === 0) {
             consecutiveEmptyPages += 1;
-            if (consecutiveEmptyPages >= 2) break;
+            if (consecutiveEmptyPages >= noGrowthStopThreshold || consecutiveNoGrowthPages >= noGrowthStopThreshold) {
+                log.info('Stopping because pagination is repeating previously captured listings.');
+                break;
+            }
+        } else {
+            consecutiveEmptyPages = 0;
+        }
+
+        if (consecutiveLowYieldPages >= 4) {
+            log.info('Stopping because pagination yield stayed very low across multiple pages.');
+            break;
         }
 
         await sleep(25 + Math.random() * 80);
@@ -588,13 +1192,15 @@ try {
     log.info(`Pages processed: ${stats.pagesProcessed}`);
     log.info(`Listing products seen: ${stats.listingProductsSeen}`);
     log.info(`Duplicates skipped: ${stats.duplicateProducts}`);
+    log.info(`Cross-page duplicates skipped: ${stats.duplicateProductsAcrossPages}`);
     log.info(`Errors: ${stats.errors}`);
+    log.info(`Diagnostics triggered: ${stats.diagnosticsTriggered}`);
     log.info(`Runtime: ${runtimeSec.toFixed(2)}s`);
     log.info(`Speed: ${(totalProducts / Math.max(runtimeSec, 1)).toFixed(2)} products/sec`);
     log.info('='.repeat(60));
 
     if (totalProducts === 0) {
-        const errorMsg = 'No products extracted from listing API state. Check URL, proxy, or page accessibility.';
+        const errorMsg = 'No products extracted from listing state. Check URL, proxy, or latest failure diagnostics.';
         log.error(errorMsg);
         await Actor.fail(errorMsg);
     } else {
@@ -603,7 +1209,9 @@ try {
             pagesProcessed: stats.pagesProcessed,
             listingProductsSeen: stats.listingProductsSeen,
             duplicateProducts: stats.duplicateProducts,
+            duplicateProductsAcrossPages: stats.duplicateProductsAcrossPages,
             runtime: runtimeSec,
+            diagnosticsTriggered: stats.diagnosticsTriggered,
             success: true,
         });
     }
