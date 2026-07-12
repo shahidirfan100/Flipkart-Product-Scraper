@@ -29,9 +29,6 @@
       "editor": "proxy",
       "default": {
         "useApifyProxy": false
-      },
-      "prefill": {
-        "useApifyProxy": false
       }
     }
   },

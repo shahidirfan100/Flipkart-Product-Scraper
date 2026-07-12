@@ -2,12 +2,14 @@
 import { readFile } from 'node:fs/promises';
 
 import { Actor, log } from 'apify';
-import { Dataset, sleep } from 'crawlee';
 import { Impit } from 'impit';
 
 const DISCOVERY_FILE = 'API_DISCOVERY.md';
 const DEFAULT_RESULTS_WANTED = 20;
 const BLOCK_TITLE_PATTERNS = ['access denied', 'captcha', 'flipkart recaptcha', 'robot check', 'unusual activity'];
+const sleep = (ms) => new Promise((resolve) => {
+    setTimeout(resolve, ms);
+});
 
 const requestWithRetry = async (fn, context, maxRetries = 3) => {
     let attempt = 0;
@@ -81,7 +83,6 @@ const buildFallbackUrls = (rawUrl) => {
     };
 
     const base = normalizeFlipkartUrl(rawUrl);
-    base.searchParams.delete('page');
     add(base.href);
 
     const normalized = new URL(base.href);
@@ -390,23 +391,24 @@ const extractStablePaginationBaseUrl = (html, currentUrl) => {
 };
 
 const DIRECT_TIMEOUT_MS = 30000;
-
-const directImpit = new Impit({
+const IMPIT_OPTIONS = {
     browser: 'chrome',
     http3: false,
     followRedirects: true,
+    ignoreTlsErrors: true,
+    vanillaFallback: true,
     maxRedirects: 5,
     timeout: DIRECT_TIMEOUT_MS,
+};
+
+const directImpit = new Impit({
+    ...IMPIT_OPTIONS,
 });
 
 const createImpit = (proxyUrl) => {
     if (!proxyUrl) return directImpit;
     return new Impit({
-        browser: 'chrome',
-        http3: false,
-        followRedirects: true,
-        maxRedirects: 5,
-        timeout: DIRECT_TIMEOUT_MS,
+        ...IMPIT_OPTIONS,
         proxyUrl,
     });
 };
@@ -580,9 +582,7 @@ const fetchListingHtml = async (rawUrl, proxyConfiguration, options = {}) => {
         for (const strategy of strategies) {
             try {
                 const result = await fetchHtmlWithProfile(url, strategy.proxyConfiguration, options);
-                if (failures.length > 0) {
-                    log.info(`Recovered using ${strategy.id} transport.`);
-                }
+                if (failures.length > 0) log.debug(`Recovered using ${strategy.id} transport.`);
                 return {
                     ...result,
                     failures,
@@ -956,14 +956,13 @@ try {
         diagnosticsTriggered: 0,
     };
     let consecutiveNoGrowthPages = 0;
-    let consecutiveLowYieldPages = 0;
 
     const pushBatch = async (force = false) => {
         if (pendingProducts.length >= batchSize || (force && pendingProducts.length > 0)) {
             const batch = pendingProducts.splice(0, batchSize);
-            await Dataset.pushData(batch);
+            await Actor.pushData(batch);
             totalPushed += batch.length;
-            log.info(`Pushed batch of ${batch.length} products (total ${totalPushed})`);
+            log.debug(`Pushed batch of ${batch.length} products (total ${totalPushed})`);
         }
     };
 
@@ -974,7 +973,7 @@ try {
         }
 
         const pageUrl = nextPageUrl || buildPageUrl(paginationBaseUrl, page);
-        log.info(`Fetching page ${page}`);
+        log.debug(`Fetching page ${page}`);
 
         let listingHtml;
         let requestSummary;
@@ -991,7 +990,7 @@ try {
             responseUrl = fetchResult.response.url || pageUrl;
             paginationBaseUrl = getPaginationBaseUrl(fetchResult.response.url || pageUrl);
             stats.pagesProcessed += 1;
-            log.info(`Fetched page ${page} with ${fetchResult.transportId} (${requestSummary.statusCode})`);
+            log.debug(`Fetched page ${page} with ${fetchResult.transportId} (${requestSummary.statusCode})`);
         } catch (error) {
             stats.errors += 1;
             stats.diagnosticsTriggered += 1;
@@ -1024,7 +1023,7 @@ try {
             }
         }
 
-        log.info(`Found ${stateProducts.length} products in listing state on page ${page}`);
+        log.debug(`Found ${stateProducts.length} products in listing state on page ${page}`);
         if (paginationState?.totalProducts && page === 1) {
             log.info(`Catalog reports ${paginationState.totalProducts} products across ${paginationState.totalPages || '?'} pages.`);
         }
@@ -1084,7 +1083,7 @@ try {
         }
 
         const prepared = totalPushed + pendingProducts.length;
-        log.info(`Page ${page} complete. Added ${pageUnique} unique products. Prepared ${prepared}/${resultsWanted}`);
+        log.debug(`Page ${page} complete. Added ${pageUnique} unique products. Prepared ${prepared}/${resultsWanted}`);
 
         const nextUrlDriftsStore = paginationState?.nextUrl
             && getSidSignature(paginationState.nextUrl)
@@ -1101,10 +1100,6 @@ try {
 
         if (pageUnique === 0) consecutiveNoGrowthPages += 1;
         else consecutiveNoGrowthPages = 0;
-
-        const lowYieldThreshold = inputUrlType === 'search' ? 3 : 2;
-        if (pageUnique <= lowYieldThreshold) consecutiveLowYieldPages += 1;
-        else consecutiveLowYieldPages = 0;
 
         if (prepared >= resultsWanted) break;
         if (!nextPageUrl) {
@@ -1124,11 +1119,6 @@ try {
             consecutiveEmptyPages = 0;
         }
 
-        if (consecutiveLowYieldPages >= 4) {
-            log.info('Stopping because pagination yield stayed very low across multiple pages.');
-            break;
-        }
-
         await sleep(25 + Math.random() * 80);
     }
 
@@ -1137,19 +1127,11 @@ try {
     const runtimeSec = (Date.now() - startTime) / 1000;
     const totalProducts = totalPushed;
 
-    log.info('='.repeat(60));
-    log.info('FLIPKART SCRAPER STATISTICS');
-    log.info('='.repeat(60));
     log.info(`Products extracted: ${totalProducts}/${resultsWanted}`);
     log.info(`Pages processed: ${stats.pagesProcessed}`);
     log.info(`Listing products seen: ${stats.listingProductsSeen}`);
     log.info(`Duplicates skipped: ${stats.duplicateProducts}`);
-    log.info(`Cross-page duplicates skipped: ${stats.duplicateProductsAcrossPages}`);
-    log.info(`Errors: ${stats.errors}`);
-    log.info(`Diagnostics triggered: ${stats.diagnosticsTriggered}`);
-    log.info(`Runtime: ${runtimeSec.toFixed(2)}s`);
-    log.info(`Speed: ${(totalProducts / Math.max(runtimeSec, 1)).toFixed(2)} products/sec`);
-    log.info('='.repeat(60));
+    log.info(`Runtime: ${runtimeSec.toFixed(2)}s, errors: ${stats.errors}, diagnostics: ${stats.diagnosticsTriggered}`);
 
     if (totalProducts === 0) {
         const errorMsg = 'No products extracted from listing state. Check URL, proxy, or latest failure diagnostics.';
