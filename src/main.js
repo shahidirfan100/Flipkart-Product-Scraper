@@ -2,69 +2,12 @@
 import { readFile } from 'node:fs/promises';
 
 import { Actor, log } from 'apify';
-import { Dataset, gotScraping, sleep } from 'crawlee';
+import { Dataset, sleep } from 'crawlee';
+import { Impit } from 'impit';
 
 const DISCOVERY_FILE = 'API_DISCOVERY.md';
 const DEFAULT_RESULTS_WANTED = 20;
 const BLOCK_TITLE_PATTERNS = ['access denied', 'captcha', 'flipkart recaptcha', 'robot check', 'unusual activity'];
-
-const REQUEST_PROFILES = [
-    {
-        id: 'firefox-desktop',
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:147.0) Gecko/20100101 Firefox/147.0',
-            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Cache-Control': 'no-cache',
-            Pragma: 'no-cache',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'same-site',
-            'Sec-Fetch-User': '?1',
-            'Upgrade-Insecure-Requests': '1',
-            Connection: 'keep-alive',
-        },
-    },
-    {
-        id: 'chrome-desktop',
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
-            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Cache-Control': 'no-cache',
-            Pragma: 'no-cache',
-            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="137", "Google Chrome";v="137"',
-            'Sec-Ch-Ua-Mobile': '?0',
-            'Sec-Ch-Ua-Platform': '"Windows"',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Upgrade-Insecure-Requests': '1',
-            Connection: 'keep-alive',
-        },
-    },
-    {
-        id: 'firefox-india',
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0',
-            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-IN,en-US;q=0.9,en;q=0.8',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Cache-Control': 'no-cache',
-            Pragma: 'no-cache',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'same-site',
-            'Sec-Fetch-User': '?1',
-            'Upgrade-Insecure-Requests': '1',
-            Referer: 'https://www.flipkart.com/',
-            Connection: 'keep-alive',
-        },
-    },
-];
 
 const requestWithRetry = async (fn, context, maxRetries = 3) => {
     let attempt = 0;
@@ -374,11 +317,10 @@ const isLikelyBlocked = (html = '') => {
     return BLOCK_TITLE_PATTERNS.some((pattern) => title.includes(pattern));
 };
 
-const summarizeHtml = (html, requestProfileId, url, response) => ({
-    requestProfileId,
+const summarizeHtml = (html, url, response) => ({
     url,
     finalUrl: response?.url || url,
-    statusCode: response?.statusCode ?? null,
+    statusCode: response?.status ?? null,
     bodyLength: html.length,
     title: html.match(/<title>([\s\S]*?)<\/title>/i)?.[1]?.trim() || null,
     hasInitialState: html.includes('window.__INITIAL_STATE__'),
@@ -445,6 +387,28 @@ const extractStablePaginationBaseUrl = (html, currentUrl) => {
     } catch {
         return best;
     }
+};
+
+const DIRECT_TIMEOUT_MS = 30000;
+
+const directImpit = new Impit({
+    browser: 'chrome',
+    http3: false,
+    followRedirects: true,
+    maxRedirects: 5,
+    timeout: DIRECT_TIMEOUT_MS,
+});
+
+const createImpit = (proxyUrl) => {
+    if (!proxyUrl) return directImpit;
+    return new Impit({
+        browser: 'chrome',
+        http3: false,
+        followRedirects: true,
+        maxRedirects: 5,
+        timeout: DIRECT_TIMEOUT_MS,
+        proxyUrl,
+    });
 };
 
 const getPageDataBuckets = (state) => {
@@ -553,7 +517,7 @@ const readLocalInputFallback = async () => {
     }
 };
 
-const fetchHtmlWithProfile = async (url, proxyConfiguration, requestProfile, options = {}) =>
+const fetchHtmlWithProfile = async (url, proxyConfiguration, options = {}) =>
     requestWithRetry(
         async () => {
             const {
@@ -564,22 +528,19 @@ const fetchHtmlWithProfile = async (url, proxyConfiguration, requestProfile, opt
 
             await sleep(minDelayMs + Math.random() * Math.max(0, maxDelayMs - minDelayMs));
 
-            const response = await gotScraping({
-                url,
-                headers: requestProfile.headers,
-                responseType: 'text',
-                proxyUrl: await pickProxyUrl(proxyConfiguration),
-                timeout: { request: timeoutMs },
-                throwHttpErrors: false,
-                followRedirect: true,
-                retry: { limit: 0 },
+            const proxyUrl = await pickProxyUrl(proxyConfiguration);
+            const impit = createImpit(proxyUrl);
+            const signal = AbortSignal.timeout(timeoutMs + 5000);
+            const response = await impit.fetch(url, {
+                timeout: timeoutMs,
+                signal,
             });
 
-            const html = response.body || '';
-            const summary = summarizeHtml(html, requestProfile.id, url, response);
+            const html = await response.text();
+            const summary = summarizeHtml(html, url, response);
 
-            if (response.statusCode >= 400) {
-                const error = new Error(`HTTP ${response.statusCode} for ${url}`);
+            if (response.status >= 400) {
+                const error = new Error(`HTTP ${response.status} for ${url}`);
                 error.summary = summary;
                 throw error;
             }
@@ -598,7 +559,7 @@ const fetchHtmlWithProfile = async (url, proxyConfiguration, requestProfile, opt
 
             return { html, response, summary };
         },
-        `Fetch page with profile ${requestProfile.id}`,
+        'Fetch page',
         options.maxRetries ?? 2
     );
 
@@ -617,31 +578,28 @@ const fetchListingHtml = async (rawUrl, proxyConfiguration, options = {}) => {
 
     for (const url of candidates) {
         for (const strategy of strategies) {
-            for (const requestProfile of REQUEST_PROFILES) {
-                try {
-                    const result = await fetchHtmlWithProfile(url, strategy.proxyConfiguration, requestProfile, options);
-                    if (failures.length > 0) {
-                        log.info(`Recovered using ${strategy.id} transport and ${requestProfile.id} profile.`);
-                    }
-                    return {
-                        ...result,
-                        failures,
-                        transportId: strategy.id,
-                    };
-                } catch (error) {
-                    failures.push({
-                        transportId: strategy.id,
-                        url,
-                        requestProfileId: requestProfile.id,
-                        message: error.message,
-                        summary: error.summary || null,
-                    });
+            try {
+                const result = await fetchHtmlWithProfile(url, strategy.proxyConfiguration, options);
+                if (failures.length > 0) {
+                    log.info(`Recovered using ${strategy.id} transport.`);
                 }
+                return {
+                    ...result,
+                    failures,
+                    transportId: strategy.id,
+                };
+            } catch (error) {
+                failures.push({
+                    transportId: strategy.id,
+                    url,
+                    message: error.message,
+                    summary: error.summary || null,
+                });
             }
         }
     }
 
-    const finalError = new Error(`All request profiles failed for ${rawUrl}`);
+    const finalError = new Error(`All fetch strategies failed for ${rawUrl}`);
     finalError.failures = failures;
     throw finalError;
 };
@@ -912,31 +870,25 @@ const diagnoseListingFailure = async ({
 
     for (const candidateUrl of buildFallbackUrls(rawUrl)) {
         for (const strategy of getTransportStrategies(proxyConfiguration)) {
-            for (const requestProfile of REQUEST_PROFILES) {
-                try {
-                    const response = await gotScraping({
-                        url: candidateUrl,
-                        headers: requestProfile.headers,
-                        responseType: 'text',
-                        proxyUrl: await pickProxyUrl(strategy.proxyConfiguration),
-                        timeout: { request: 15000 },
-                        throwHttpErrors: false,
-                        followRedirect: true,
-                        retry: { limit: 0 },
-                    });
-                    const html = response.body || '';
-                    diagnostics.probes.push({
-                        transportId: strategy.id,
-                        ...summarizeHtml(html, requestProfile.id, candidateUrl, response),
-                    });
-                } catch (probeError) {
-                    diagnostics.probes.push({
-                        transportId: strategy.id,
-                        requestProfileId: requestProfile.id,
-                        url: candidateUrl,
-                        error: probeError.message,
-                    });
-                }
+            try {
+                const proxyUrl = await pickProxyUrl(strategy.proxyConfiguration);
+                const impit = createImpit(proxyUrl);
+                const signal = AbortSignal.timeout(20000);
+                const response = await impit.fetch(candidateUrl, {
+                    timeout: 15000,
+                    signal,
+                });
+                const html = await response.text();
+                diagnostics.probes.push({
+                    transportId: strategy.id,
+                    ...summarizeHtml(html, candidateUrl, response),
+                });
+            } catch (probeError) {
+                diagnostics.probes.push({
+                    transportId: strategy.id,
+                    url: candidateUrl,
+                    error: probeError.message,
+                });
             }
         }
     }
@@ -944,7 +896,7 @@ const diagnoseListingFailure = async ({
     await Actor.setValue('LATEST_FAILURE_DIAGNOSTICS', diagnostics);
     const firstSuccessLike = diagnostics.probes.find((probe) => probe.hasInitialState || probe.jsonLdCount);
     if (firstSuccessLike) {
-        log.warning(`Diagnostics found recoverable content via ${firstSuccessLike.transportId}/${firstSuccessLike.requestProfileId}.`);
+        log.warning(`Diagnostics found recoverable content via ${firstSuccessLike.transportId}.`);
     }
 
     return diagnostics;
@@ -1039,7 +991,7 @@ try {
             responseUrl = fetchResult.response.url || pageUrl;
             paginationBaseUrl = getPaginationBaseUrl(fetchResult.response.url || pageUrl);
             stats.pagesProcessed += 1;
-            log.info(`Fetched page ${page} with ${fetchResult.transportId}/${requestSummary.requestProfileId} (${requestSummary.statusCode})`);
+            log.info(`Fetched page ${page} with ${fetchResult.transportId} (${requestSummary.statusCode})`);
         } catch (error) {
             stats.errors += 1;
             stats.diagnosticsTriggered += 1;
