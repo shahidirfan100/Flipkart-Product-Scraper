@@ -1,96 +1,101 @@
-# Flipkart Product Scraper
+## What does Flipkart Product Scraper do?
 
-Extract Flipkart product listings at scale with reliable, structured output. Collect pricing, ratings, availability, and product metadata for research, monitoring, and analytics. Built for fast collection, strict result targeting, and resilient reruns when Flipkart shifts request behavior.
+Flipkart Product Scraper collects structured product listings from Flipkart.com. Provide a category or search results URL, and the Actor returns product titles, prices, ratings, specifications, availability, and seller metadata. The extracted data works for price monitoring, catalog research, competitive analysis, and ecommerce intelligence workflows.
 
-## Features
+## Why use Flipkart Product Scraper?
 
-- **Fast collection mode** - Prioritizes speed by extracting directly from listing pages.
-- **Strict target pagination** - Continues pagination to reach your requested `results_wanted` count when products are available.
-- **Rich structured output** - Returns normalized numeric/text fields ready for analysis.
-- **Self-healing request strategy** - Tries multiple safe request profiles and normalized listing URLs before failing.
-- **Failure diagnostics** - Stores a structured diagnostic report when a page blocks or stops exposing listing products.
+- **Structured product data at scale** - Collect hundreds of product records from Flipkart in a single run without manual browsing or copy-paste.
+- **Rich product-level fields** - Extract pricing (current, original, discount), ratings, review counts, rating breakdowns, specifications, and availability indicators in normalized formats.
+- **Automation-ready output** - Export results to JSON, CSV, Excel, or connect the Actor to schedules, webhooks, and integrations for recurring data collection.
+- **Resilient extraction** - The Actor retries with alternative request profiles and stores structured diagnostics if a page blocks or stops returning listing products.
 
-## Use Cases
+## What data can you extract from Flipkart?
 
-### Price Monitoring
-Track selling price, original price, and discount changes across categories. Use repeated runs to monitor promotions and pricing trends.
+| Field | Description |
+|-------|-------------|
+| `title` | Product title |
+| `brand` | Product brand |
+| `price` | Current selling price |
+| `original_price` | Original or MRP |
+| `discount_percent` | Discount percentage |
+| `rating` | Average customer rating |
+| `rating_count` | Total rating count |
+| `review_count` | Total review count |
+| `specifications` | Structured specification key-values |
+| `availability_status` | Stock availability state |
+| `image_url` | Product image URL |
+| `url` | Direct product URL |
 
-### Catalog Intelligence
-Build product datasets with IDs, listings, brand/category metadata, and key specs. Useful for product benchmarking and catalog enrichment.
+## How to use Flipkart Product Scraper
 
-### Seller and Availability Tracking
-Capture listing availability and buyability indicators. Helpful for operational market monitoring.
-
-### Competitive Analysis
-Compare rating volume and review volume across similar products. Identify fast-moving and high-engagement listings.
-
----
+1. Open the Actor on Apify Store.
+2. Enter a Flipkart category URL or search results URL.
+3. Set the maximum number of products to collect.
+4. Optionally configure proxy settings for larger runs.
+5. Run the Actor.
+6. Download the dataset or connect it to your workflow.
 
 ## Input Parameters
 
 | Parameter | Type | Required | Default | Description |
-|---|---|---|---|---|
+|-----------|------|----------|---------|-------------|
 | `startUrl` | String | No | Flipkart monitors listing URL | Flipkart category or search URL to scrape. |
 | `results_wanted` | Integer | No | `20` | Maximum number of products to return. |
 | `proxyConfiguration` | Object | No | Apify proxy preset | Proxy settings for reliability at scale. |
 
----
-
 ## Output Data
 
-Each dataset item may contain:
-
 | Field | Type | Description |
-|---|---|---|
-| `id` | String\|Null | Product identifier. |
-| `item_id` | String\|Null | Item identifier if available. |
-| `listing_id` | String\|Null | Listing identifier. |
-| `title` | String\|Null | Product title. |
-| `brand` | String\|Null | Product brand. |
-| `category` | String\|Null | Category/vertical label. |
-| `price` | Number\|Null | Current price. |
-| `price_text` | String\|Null | Current price as formatted text. |
-| `original_price` | Number\|Null | Original/MRP price. |
-| `original_price_text` | String\|Null | Original/MRP as formatted text. |
-| `discount_percent` | Number\|Null | Discount percentage. |
-| `discount_amount` | Number\|Null | Discount amount. |
-| `discount_text` | String\|Null | Discount text label. |
-| `rating` | Number\|Null | Average rating. |
-| `rating_count` | Number\|Null | Total rating count. |
-| `review_count` | Number\|Null | Total review count. |
-| `rating_breakdown` | Object\|Null | Count per rating bucket (1-5). |
-| `specifications` | Object\|Null | Structured specification key-values. |
-| `key_specs` | String[]\|Null | Key specification bullets. |
-| `warranty_summary` | String\|Null | Warranty summary text. |
-| `availability_status` | String\|Null | Availability state. |
-| `is_available` | Boolean\|Null | Availability flag. |
-| `buyability_intent` | String\|Null | Buyability intent exposed by the listing state. |
-| `is_flipkart_advantage` | Boolean\|Null | Flipkart advantage style flag when present. |
-| `swatch_available` | Boolean\|Null | Indicates whether listing swatches are available. |
-| `currency` | String\|Null | Currency code. |
-| `analytics_category` | String\|Null | Analytics category label from Flipkart state. |
-| `analytics_sub_category` | String\|Null | Analytics sub-category label from Flipkart state. |
-| `market_place` | String\|Null | Marketplace label. |
-| `image_url` | String\|Null | Product image URL. |
-| `url` | String\|Null | Product URL. |
-| `fetched_at` | String | Extraction timestamp in ISO format. |
-
----
+|-------|------|-------------|
+| `id` | String or Null | Product identifier |
+| `item_id` | String or Null | Item identifier when available |
+| `listing_id` | String or Null | Listing identifier |
+| `title` | String or Null | Product title |
+| `brand` | String or Null | Product brand |
+| `category` | String or Null | Category label |
+| `price` | Number or Null | Current selling price |
+| `price_text` | String or Null | Current price as formatted text |
+| `original_price` | Number or Null | Original or MRP price |
+| `original_price_text` | String or Null | Original MRP as formatted text |
+| `discount_percent` | Number or Null | Discount percentage |
+| `discount_amount` | Number or Null | Discount amount |
+| `discount_text` | String or Null | Discount text label |
+| `rating` | Number or Null | Average customer rating |
+| `rating_count` | Number or Null | Total rating count |
+| `review_count` | Number or Null | Total review count |
+| `rating_breakdown` | Object or Null | Count per rating bucket (1-5) |
+| `specifications` | Object or Null | Structured specification key-values |
+| `key_specs` | Array or Null | Key specification bullets |
+| `warranty_summary` | String or Null | Warranty summary text |
+| `availability_status` | String or Null | Availability state |
+| `is_available` | Boolean or Null | Availability flag |
+| `buyability_intent` | String or Null | Buyability intent from listing state |
+| `is_flipkart_advantage` | Boolean or Null | Flipkart Advantage flag when present |
+| `swatch_available` | Boolean or Null | Indicates whether listing swatches are available |
+| `currency` | String or Null | Currency code |
+| `analytics_category` | String or Null | Analytics category label |
+| `analytics_sub_category` | String or Null | Analytics sub-category label |
+| `market_place` | String or Null | Marketplace label |
+| `image_url` | String or Null | Product image URL |
+| `url` | String or Null | Product URL |
+| `fetched_at` | String | Extraction timestamp in ISO format |
 
 ## Usage Examples
 
-### Fast Extraction (Recommended)
+### Basic Product Extraction
 
-Use default fast mode for maximum speed.
+Collect the first set of products from a Flipkart category page:
 
 ```json
 {
   "startUrl": "https://www.flipkart.com/computers/computer-components/monitors/pr?sid=6bo,g0i,9no&marketplace=FLIPKART",
-  "results_wanted": 100
+  "results_wanted": 20
 }
 ```
 
-### High-Volume Collection with Proxies
+### Large Collection Run
+
+Request a larger batch of products from a mobile phones category:
 
 ```json
 {
@@ -103,7 +108,16 @@ Use default fast mode for maximum speed.
 }
 ```
 
----
+### Search Results Extraction
+
+Collect products from a specific search query:
+
+```json
+{
+  "startUrl": "https://www.flipkart.com/search?q=laptop+under+50000",
+  "results_wanted": 50
+}
+```
 
 ## Sample Output
 
@@ -137,38 +151,27 @@ Use default fast mode for maximum speed.
   "analytics_category": "ComputerComponents",
   "analytics_sub_category": "Monitors",
   "image_url": "https://rukmini1.flixcart.com/image/1500/1500/xif0q/monitor/l/v/a/mon-0079c-full-hd-22-2024-mon-0079c-frontech-original-imahkm4mftzgg96g.jpeg?q=70",
-  "url": "https://www.flipkart.com/...",
+  "url": "https://www.flipkart.com/frontech-ultima-series-55-88-cm-22-inch-full-hd-led-backlit-va-panel-monitor/p/itm1c7e1c7e1c7e1",
   "fetched_at": "2026-02-13T06:57:02.015Z"
 }
 ```
 
----
-
 ## Tips for Best Results
 
-### Prioritize Fast Mode
-- Use the default settings for the fastest runs.
-- Increase `results_wanted` gradually to estimate runtime for your category.
-
-### Use Stable Listing URLs
-- Prefer category and search URLs that show normal product listings.
-- Validate that the URL opens product cards in your browser before running.
-
-### Scale Safely
-- Use residential proxies for larger runs and stricter categories.
-- Keep request volume realistic for the target category depth.
-
----
+- Use complete, public Flipkart category or search URLs. Validate that the URL opens product listings in your browser before running.
+- Start with a smaller `results_wanted` value for testing. Increase it gradually to estimate runtime for your category.
+- Use residential proxies for larger runs and categories that may have stricter request handling.
+- If certain fields return null, check whether the source listing page exposes that information. Some categories use different listing layouts.
 
 ## Integrations
 
-Connect your extracted dataset with:
+Connect your extracted Flipkart data with:
 
-- **Google Sheets** - Build live tracking sheets.
+- **Google Sheets** - Build live price tracking and inventory sheets.
 - **Airtable** - Create searchable product databases.
-- **Make** - Automate downstream workflows.
-- **Zapier** - Trigger actions in business tools.
-- **Webhooks** - Push data into your own systems.
+- **Make** - Automate downstream workflows with no-code connectors.
+- **Zapier** - Trigger actions in business tools after each run.
+- **Webhooks** - Push data into your own systems programmatically.
 
 ### Export Formats
 
@@ -177,45 +180,50 @@ Connect your extracted dataset with:
 - **Excel** - Best for operational reporting.
 - **HTML** - Quick human-readable preview.
 
----
-
 ## Frequently Asked Questions
 
-### Does it paginate until my requested count?
-Yes. The actor paginates listing pages to reach `results_wanted` when enough products are available.
+### Can I export Flipkart data to CSV or Excel?
 
-### Which mode is fastest?
-The actor runs in an optimized fast mode by default and is recommended for bulk extraction.
+Yes. Apify datasets can be downloaded in CSV, Excel, JSON, XML, and other supported formats from the Apify Console.
 
-### Can available fields vary by category?
-Yes. Some fields depend on what each listing exposes, so certain attributes may be null in some categories.
+### Can I run this Actor on a schedule?
+
+Yes. You can schedule the Actor in Apify Console to refresh Flipkart product data hourly, daily, weekly, or at another interval.
+
+### Does the Actor paginate until it reaches my requested count?
+
+Yes. The Actor paginates through Flipkart listing pages to reach your `results_wanted` count when enough products are available.
 
 ### Why are some fields null?
-Some products or listings do not expose every field consistently. Null values are expected in such cases.
 
-### What happens if Flipkart changes request behavior?
-The actor retries with alternative request fingerprints and stores structured diagnostics if a page blocks or stops returning listing products.
+Some products or Flipkart categories do not expose every field consistently. Null values are expected when the source page does not include that information.
 
-### Can I scrape search URLs and category URLs?
-Yes. Both are supported as long as they return product listing pages.
+### What happens if Flipkart changes its page structure?
 
-### How many products can I collect?
-You can request large volumes; practical limits depend on page availability, category depth, and runtime constraints.
+The Actor retries with alternative request profiles and stores a structured diagnostic report if a page blocks or stops returning product listings.
 
----
+### Can I scrape both category URLs and search URLs?
+
+Yes. Both Flipkart category URLs and search results URLs are supported as long as they return product listing pages.
+
+### How many products can I collect in one run?
+
+You can request large volumes. Practical limits depend on category depth, page availability, and runtime constraints.
+
+### Is it legal to scrape Flipkart?
+
+Scraping public web data can be legal, but you are responsible for complying with applicable laws, Flipkart's terms of service, and privacy regulations.
+
+## Related Actors
+
+- [Shopify Product Scraper](https://apify.com/shahidirfan/shopify-product-scraper) - Extract product catalogs from any Shopify store with variant-level detail.
+- [Walmart Product Scraper](https://apify.com/shahidirfan/walmart-product-scraper) - Collect Walmart product listings, pricing, ratings, and seller info.
+- [Target Product Scraper](https://apify.com/shahidirfan/target-product-scraper) - Scrape Target.com product data with prices, reviews, and inventory levels.
 
 ## Support
 
-For issues or feature requests, use the actor issue tracker in Apify Console.
-
-### Resources
-
-- [Apify Documentation](https://docs.apify.com/)
-- [Apify API Reference](https://docs.apify.com/api/v2)
-- [Apify Schedules](https://docs.apify.com/platform/schedules)
-
----
+For issues, feature requests, or custom Actor work, use the Issues tab on the Actor page or contact the developer through Apify.
 
 ## Legal Notice
 
-This actor is intended for legitimate data collection and analysis use cases. You are responsible for complying with applicable laws, platform terms, and responsible usage practices.
+This Actor is designed for legitimate data collection from publicly available pages on Flipkart.com. Users are responsible for using the data responsibly and complying with applicable laws and website terms.
