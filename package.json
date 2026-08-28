@@ -5,11 +5,12 @@
   "type": "module",
   "dependencies": {
     "apify": "^3.7.2",
-    "crawlee": "^3.16.0",
-    "impit": "^0.14.2"
+    "crawlee": "^3.18.1",
+    "impit": "^0.14.4",
+    "tough-cookie": "^6.0.2"
   },
   "devDependencies": {
-    "@apify/eslint-config": "^2.0.0",
+    "@apify/eslint-config": "^2.0.6",
     "eslint": "^9.29.0",
     "eslint-config-prettier": "^10.1.5",
     "prettier": "^3.5.3"

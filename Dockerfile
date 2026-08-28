@@ -4,9 +4,10 @@ FROM apify/actor-node:22
 # Copy package files
 COPY --chown=myuser:myuser package*.json ./
 
-# Install NPM packages, skip optional and development dependencies
+# Install production packages, including Impit's native optional binary
 RUN npm --quiet set progress=false \
-    && npm install --omit=dev \
+    && npm install --omit=dev --include=optional \
+    && node -e "import('impit').then(() => console.log('impit OK'))" \
     && echo "Installed NPM packages:" \
     && (npm list --omit=dev --all || true) \
     && echo "Node.js version:" \

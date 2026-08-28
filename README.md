@@ -1,6 +1,6 @@
 ## What does Flipkart Product Scraper do?
 
-Flipkart Product Scraper collects structured product listings from Flipkart.com. Provide a category or search results URL, and the Actor returns product titles, prices, ratings, specifications, availability, and seller metadata. The extracted data works for price monitoring, catalog research, competitive analysis, and ecommerce intelligence workflows.
+Flipkart Product Scraper collects structured product listings from Flipkart.com. Provide a category or search results URL, or search by keyword, and the Actor returns product titles, prices, ratings, specifications, availability, and seller metadata. The extracted data works for price monitoring, catalog research, competitive analysis, and ecommerce intelligence workflows.
 
 ## Why use Flipkart Product Scraper?
 
@@ -29,8 +29,8 @@ Flipkart Product Scraper collects structured product listings from Flipkart.com.
 ## How to use Flipkart Product Scraper
 
 1. Open the Actor on Apify Store.
-2. Enter a Flipkart category URL or search results URL.
-3. Set the maximum number of products to collect.
+2. Enter a Flipkart category/search URL or a keyword.
+3. Choose an optional sort order and set the maximum number of products to collect.
 4. Optionally configure proxy settings for larger runs.
 5. Run the Actor.
 6. Download the dataset or connect it to your workflow.
@@ -39,9 +39,13 @@ Flipkart Product Scraper collects structured product listings from Flipkart.com.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `startUrl` | String | No | Flipkart monitors listing URL | Flipkart category or search URL to scrape. |
+| `startUrl` | String | No | Category URL prefill | Optional category or search URL. Use this or `keyword`, not both. |
+| `keyword` | String | No | Empty | Optional keyword search. Use this or `startUrl`, not both. If both are supplied, the keyword takes priority. |
+| `sort` | String | No | `relevance` | `relevance`, `popularity`, `price_asc`, `price_desc`, or `newest`. |
 | `results_wanted` | Integer | No | `20` | Maximum number of products to return. |
-| `proxyConfiguration` | Object | No | Apify proxy preset | Proxy settings for reliability at scale. |
+| `proxyConfiguration` | Object | No | Direct | Optional proxy settings for larger runs. |
+
+Use exactly one search source: provide `startUrl` or `keyword`. The form's category URL is only a fallback example when no user source is supplied. If both sources are present, the keyword takes priority and the Actor performs one run only.
 
 ## Output Data
 
@@ -108,16 +112,19 @@ Request a larger batch of products from a mobile phones category:
 }
 ```
 
-### Search Results Extraction
+### Keyword Search And Sorting
 
-Collect products from a specific search query:
+Use a keyword instead of a URL, then choose a sort order. Leave `startUrl` empty when calling the Actor directly with a keyword:
 
 ```json
 {
-  "startUrl": "https://www.flipkart.com/search?q=laptop+under+50000",
-  "results_wanted": 50
+  "keyword": "laptop",
+  "sort": "price_desc",
+  "results_wanted": 20
 }
 ```
+
+Use either `startUrl` or `keyword` as the search source. The Actor runs one source per run, never both. User-provided search and sort values are used as supplied.
 
 ## Sample Output
 
@@ -202,9 +209,9 @@ Some products or Flipkart categories do not expose every field consistently. Nul
 
 The Actor retries with alternative request profiles and stores a structured diagnostic report if a page blocks or stops returning product listings.
 
-### Can I scrape both category URLs and search URLs?
+### Can I search with a URL or a keyword?
 
-Yes. Both Flipkart category URLs and search results URLs are supported as long as they return product listing pages.
+Yes. Provide either `startUrl` for a category or search page, or `keyword` for a keyword search. If both are present, the keyword is the active source and the Actor performs one run only.
 
 ### How many products can I collect in one run?
 

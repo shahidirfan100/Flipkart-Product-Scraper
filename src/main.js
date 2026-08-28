@@ -3,13 +3,25 @@ import { readFile } from 'node:fs/promises';
 
 import { Actor, log } from 'apify';
 import { Impit } from 'impit';
+import { CookieJar } from 'tough-cookie';
 
 const DISCOVERY_FILE = 'API_DISCOVERY.md';
+const DEFAULT_SEARCH_URL = 'https://www.flipkart.com/search';
 const DEFAULT_RESULTS_WANTED = 20;
 const BLOCK_TITLE_PATTERNS = ['access denied', 'captcha', 'flipkart recaptcha', 'robot check', 'unusual activity'];
 const sleep = (ms) => new Promise((resolve) => {
     setTimeout(resolve, ms);
 });
+
+const getErrorStatusCode = (error) =>
+    error.statusCode ?? error.response?.statusCode ?? error.summary?.statusCode ?? null;
+
+const isRetryableFailure = (error) => {
+    const statusCode = getErrorStatusCode(error);
+    if (statusCode === null) return true;
+    if ([408, 425, 429].includes(statusCode)) return true;
+    return statusCode >= 500 && statusCode <= 599;
+};
 
 const requestWithRetry = async (fn, context, maxRetries = 3) => {
     let attempt = 0;
@@ -21,9 +33,9 @@ const requestWithRetry = async (fn, context, maxRetries = 3) => {
             return await fn();
         } catch (error) {
             lastError = error;
-            const statusCode = error.response?.statusCode;
+            const statusCode = getErrorStatusCode(error);
 
-            if (statusCode === 404) throw error;
+            if (!isRetryableFailure(error) || statusCode === 404) throw error;
 
             log.warning(`${context} failed (attempt ${attempt}/${maxRetries}): ${error.message}`);
 
@@ -37,9 +49,6 @@ const requestWithRetry = async (fn, context, maxRetries = 3) => {
     throw lastError;
 };
 
-const pickProxyUrl = async (proxyConfiguration) =>
-    proxyConfiguration ? proxyConfiguration.newUrl() : undefined;
-
 const normalizeFlipkartUrl = (rawUrl) => {
     const url = new URL(rawUrl.trim());
     url.hash = '';
@@ -47,8 +56,48 @@ const normalizeFlipkartUrl = (rawUrl) => {
     url.searchParams.delete('otracker');
     url.searchParams.delete('otracker1');
     url.searchParams.delete('marketplace');
-    url.searchParams.set('marketplace', 'FLIPKART');
+    if (!url.pathname.startsWith('/search')) url.searchParams.set('marketplace', 'FLIPKART');
     return url;
+};
+
+const toComparableNumber = (value) => {
+    const number = Number(String(value).replace(/[^\d.-]/g, ''));
+    return Number.isFinite(number) ? number : null;
+};
+
+const sortMappedProducts = (products, sort) => {
+    if (!['price_asc', 'price_desc'].includes(sort)) return products;
+
+    return [...products].sort((left, right) => {
+        const leftPrice = toComparableNumber(left.price);
+        const rightPrice = toComparableNumber(right.price);
+        if (leftPrice === null && rightPrice === null) return 0;
+        if (leftPrice === null) return 1;
+        if (rightPrice === null) return -1;
+        return sort === 'price_asc' ? leftPrice - rightPrice : rightPrice - leftPrice;
+    });
+};
+
+const buildInputUrl = (rawUrl, { keyword, sort } = {}) => {
+    const url = new URL(rawUrl.trim());
+    const trimmedKeyword = typeof keyword === 'string' ? keyword.trim() : '';
+
+    if (trimmedKeyword) {
+        const preservedParams = [...url.searchParams.entries()]
+            .filter(([key]) => !['q', 'sid', 'marketplace', 'page', 'otracker', 'otracker1'].includes(key));
+        url.pathname = '/search';
+        url.search = '';
+        url.searchParams.set('q', trimmedKeyword);
+        if (sort && sort !== 'relevance') url.searchParams.set('sort', String(sort));
+        url.searchParams.set('otracker', 'search');
+        for (const [key, value] of preservedParams) url.searchParams.append(key, value);
+    } else if (sort === 'relevance') {
+        url.searchParams.delete('sort');
+    } else if (sort) {
+        url.searchParams.set('sort', String(sort));
+    }
+
+    return url.href;
 };
 
 const getUrlType = (rawUrl) => {
@@ -390,27 +439,37 @@ const extractStablePaginationBaseUrl = (html, currentUrl) => {
     }
 };
 
-const DIRECT_TIMEOUT_MS = 30000;
 const IMPIT_OPTIONS = {
-    browser: 'chrome',
+    browser: 'firefox144',
     http3: false,
     followRedirects: true,
     ignoreTlsErrors: true,
-    vanillaFallback: true,
     maxRedirects: 5,
-    timeout: DIRECT_TIMEOUT_MS,
 };
 
-const directImpit = new Impit({
+const createImpit = (proxyUrl) => new Impit({
     ...IMPIT_OPTIONS,
+    cookieJar: new CookieJar(),
+    ...(proxyUrl ? { proxyUrl } : {}),
 });
 
-const createImpit = (proxyUrl) => {
-    if (!proxyUrl) return directImpit;
-    return new Impit({
-        ...IMPIT_OPTIONS,
-        proxyUrl,
-    });
+const createTransportStrategies = async (proxyConfiguration) => {
+    const direct = { id: 'direct', client: createImpit() };
+    if (!proxyConfiguration) return [direct];
+
+    const proxyUrl = await proxyConfiguration.newUrl();
+    return [
+        { id: 'proxy', client: createImpit(proxyUrl) },
+        direct,
+    ];
+};
+
+const orderTransportStrategies = (transports, preferredTransportId) => {
+    if (!preferredTransportId) return transports;
+    return [
+        ...transports.filter(({ id }) => id === preferredTransportId),
+        ...transports.filter(({ id }) => id !== preferredTransportId),
+    ];
 };
 
 const getPageDataBuckets = (state) => {
@@ -519,21 +578,15 @@ const readLocalInputFallback = async () => {
     }
 };
 
-const fetchHtmlWithProfile = async (url, proxyConfiguration, options = {}) =>
+const fetchHtmlWithProfile = async (url, transport, options = {}) =>
     requestWithRetry(
         async () => {
             const {
-                minDelayMs = 20,
-                maxDelayMs = 90,
                 timeoutMs = 20000,
             } = options;
 
-            await sleep(minDelayMs + Math.random() * Math.max(0, maxDelayMs - minDelayMs));
-
-            const proxyUrl = await pickProxyUrl(proxyConfiguration);
-            const impit = createImpit(proxyUrl);
             const signal = AbortSignal.timeout(timeoutMs + 5000);
-            const response = await impit.fetch(url, {
+            const response = await transport.client.fetch(url, {
                 timeout: timeoutMs,
                 signal,
             });
@@ -543,6 +596,7 @@ const fetchHtmlWithProfile = async (url, proxyConfiguration, options = {}) =>
 
             if (response.status >= 400) {
                 const error = new Error(`HTTP ${response.status} for ${url}`);
+                error.statusCode = response.status;
                 error.summary = summary;
                 throw error;
             }
@@ -555,6 +609,7 @@ const fetchHtmlWithProfile = async (url, proxyConfiguration, options = {}) =>
 
             if (summary.blocked) {
                 const error = new Error(`Likely blocked page content for ${url}`);
+                error.statusCode = response.status;
                 error.summary = summary;
                 throw error;
             }
@@ -565,23 +620,15 @@ const fetchHtmlWithProfile = async (url, proxyConfiguration, options = {}) =>
         options.maxRetries ?? 2
     );
 
-const getTransportStrategies = (proxyConfiguration) => {
-    if (!proxyConfiguration) return [{ id: 'direct', proxyConfiguration: undefined }];
-    return [
-        { id: 'proxy', proxyConfiguration },
-        { id: 'direct-fallback', proxyConfiguration: undefined },
-    ];
-};
-
-const fetchListingHtml = async (rawUrl, proxyConfiguration, options = {}) => {
+const fetchListingHtml = async (rawUrl, transports, preferredTransportId, options = {}) => {
     const candidates = buildFallbackUrls(rawUrl);
     const failures = [];
-    const strategies = getTransportStrategies(proxyConfiguration);
+    const strategies = orderTransportStrategies(transports, preferredTransportId);
 
     for (const url of candidates) {
         for (const strategy of strategies) {
             try {
-                const result = await fetchHtmlWithProfile(url, strategy.proxyConfiguration, options);
+                const result = await fetchHtmlWithProfile(url, strategy, options);
                 if (failures.length > 0) log.debug(`Recovered using ${strategy.id} transport.`);
                 return {
                     ...result,
@@ -848,7 +895,8 @@ const dedupeProducts = (items) => {
 const diagnoseListingFailure = async ({
     discoveryInfo,
     rawUrl,
-    proxyConfiguration,
+    transports,
+    preferredTransportId,
     error,
     page,
 }) => {
@@ -869,12 +917,10 @@ const diagnoseListingFailure = async ({
     }
 
     for (const candidateUrl of buildFallbackUrls(rawUrl)) {
-        for (const strategy of getTransportStrategies(proxyConfiguration)) {
+        for (const strategy of orderTransportStrategies(transports, preferredTransportId)) {
             try {
-                const proxyUrl = await pickProxyUrl(strategy.proxyConfiguration);
-                const impit = createImpit(proxyUrl);
                 const signal = AbortSignal.timeout(20000);
-                const response = await impit.fetch(candidateUrl, {
+                const response = await strategy.client.fetch(candidateUrl, {
                     timeout: 15000,
                     signal,
                 });
@@ -909,12 +955,16 @@ try {
     const input = Object.keys(actorInput).length > 0 ? actorInput : await readLocalInputFallback();
     const {
         startUrl,
+        keyword,
+        sort,
         results_wanted: resultsWantedRaw = DEFAULT_RESULTS_WANTED,
         proxyConfiguration,
     } = input;
 
-    if (!startUrl) {
-        throw new Error('Missing required input: startUrl. Provide a Flipkart listing or search URL.');
+    const hasStartUrl = typeof startUrl === 'string' && startUrl.trim().length > 0;
+    const hasKeyword = typeof keyword === 'string' && keyword.trim().length > 0;
+    if (!hasStartUrl && !hasKeyword) {
+        throw new Error('Provide either startUrl or keyword to select one Flipkart search source.');
     }
 
     const resultsWanted = Number.isFinite(+resultsWantedRaw) ? Math.max(1, +resultsWantedRaw) : DEFAULT_RESULTS_WANTED;
@@ -927,20 +977,27 @@ try {
     const proxyConf = shouldUseProxy
         ? await Actor.createProxyConfiguration({ ...proxyConfiguration })
         : undefined;
+    const transports = await createTransportStrategies(proxyConf);
 
+    const sourceUrl = hasStartUrl ? startUrl.trim() : DEFAULT_SEARCH_URL;
+    const targetUrl = buildInputUrl(sourceUrl, { keyword, sort });
     const discoveryInfo = await readApiDiscovery();
-    const inputUrlType = getUrlType(startUrl);
+    const inputUrlType = getUrlType(targetUrl);
 
     log.info('Starting Flipkart Product Scraper (listing state only)');
     log.info(`Input type: ${inputUrlType}`);
     log.info(`Requested products: ${resultsWanted}`);
+    if (hasKeyword) log.info(`Keyword search enabled: ${keyword.trim()}`);
+    if (hasStartUrl && hasKeyword) log.info('Keyword takes priority over startUrl; running one search source.');
+    if (sort) log.info(`Sort: ${sort}`);
     log.info(`Transport preference: ${proxyConf ? 'proxy-first with direct fallback' : 'direct'}`);
 
     const seenProductKeys = new Set();
     const pendingProducts = [];
-    let paginationBaseUrl = getPaginationBaseUrl(startUrl);
+    let paginationBaseUrl = getPaginationBaseUrl(targetUrl);
     let nextPageUrl = paginationBaseUrl;
     let preferStablePageParamPagination = false;
+    let preferredTransportId = transports[0].id;
 
     const startTime = Date.now();
     let totalPushed = 0;
@@ -979,9 +1036,7 @@ try {
         let requestSummary;
         let responseUrl;
         try {
-            const fetchResult = await fetchListingHtml(pageUrl, proxyConf, {
-                minDelayMs: 20,
-                maxDelayMs: 90,
+            const fetchResult = await fetchListingHtml(pageUrl, transports, preferredTransportId, {
                 timeoutMs: 20000,
                 maxRetries: 2,
             });
@@ -989,6 +1044,7 @@ try {
             requestSummary = fetchResult.summary;
             responseUrl = fetchResult.response.url || pageUrl;
             paginationBaseUrl = getPaginationBaseUrl(fetchResult.response.url || pageUrl);
+            preferredTransportId = fetchResult.transportId;
             stats.pagesProcessed += 1;
             log.debug(`Fetched page ${page} with ${fetchResult.transportId} (${requestSummary.statusCode})`);
         } catch (error) {
@@ -998,7 +1054,8 @@ try {
             await diagnoseListingFailure({
                 discoveryInfo,
                 rawUrl: pageUrl,
-                proxyConfiguration: proxyConf,
+                transports,
+                preferredTransportId,
                 error,
                 page,
             });
@@ -1038,7 +1095,8 @@ try {
             await diagnoseListingFailure({
                 discoveryInfo,
                 rawUrl: pageUrl,
-                proxyConfiguration: proxyConf,
+                transports,
+                preferredTransportId,
                 error: new Error('No listing products found in state or JSON-LD'),
                 page,
             });
@@ -1051,10 +1109,11 @@ try {
 
         consecutiveEmptyPages = 0;
 
-        const mappedProducts = dedupeProducts([
+        const candidateProducts = dedupeProducts([
             ...stateProducts.map((product) => mapListingProduct(product)),
             ...jsonLdProducts,
         ]);
+        const mappedProducts = sortMappedProducts(candidateProducts, sort);
 
         let pageUnique = 0;
         for (const mapped of mappedProducts) {
@@ -1119,7 +1178,6 @@ try {
             consecutiveEmptyPages = 0;
         }
 
-        await sleep(25 + Math.random() * 80);
     }
 
     await pushBatch(true);

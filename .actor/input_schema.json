@@ -1,17 +1,32 @@
 {
   "title": "Flipkart Product Scraper",
-  "description": "Extract product listings from Flipkart.com. Provide a category or search URL to scrape products with prices, ratings, and specifications.",
+  "description": "Extract product listings from Flipkart.com using either a category/search URL or a keyword, with optional sorting.",
   "type": "object",
   "schemaVersion": 1,
   "properties": {
     "startUrl": {
       "title": "Flipkart URL",
       "type": "string",
-      "description": "Flipkart category or search results URL to scrape.",
+      "description": "Optional Flipkart category or search URL. Use this or keyword, not both; keyword takes priority if both are supplied.",
       "editor": "textfield",
       "prefill": "https://www.flipkart.com/computers/computer-components/monitors/pr?sid=6bo,g0i,9no&marketplace=FLIPKART",
-      "default": "https://www.flipkart.com/computers/computer-components/monitors/pr?sid=6bo,g0i,9no&marketplace=FLIPKART",
       "example": "https://www.flipkart.com/computers/computer-components/monitors/pr?sid=6bo,g0i,9no&marketplace=FLIPKART"
+    },
+    "keyword": {
+      "title": "Keyword Search",
+      "type": "string",
+      "description": "Optional keyword search. Use this or startUrl, not both; keyword takes priority if both are supplied.",
+      "editor": "textfield",
+      "default": ""
+    },
+    "sort": {
+      "title": "Sort Results",
+      "type": "string",
+      "description": "Optional Flipkart sort order.",
+      "editor": "select",
+      "enum": ["relevance", "popularity", "price_asc", "price_desc", "newest"],
+      "enumTitles": ["Relevance", "Popularity", "Price: Low to High", "Price: High to Low", "Newest First"],
+      "default": "relevance"
     },
     "results_wanted": {
       "title": "Maximum Products",

@@ -1,4 +1,5 @@
 ## Selected API
+
 - Endpoint: `GET https://www.flipkart.com/<listing-or-search-url>`
 - Method: `GET`
 - Auth: None
@@ -7,38 +8,48 @@
 - Fields currently missing in actor: no additional stable listing fields were confirmed as consistently richer than the current mapping during this run
 - Field count: 30+ mapped fields from the embedded state object
 
+## Request-flow evidence
+
+| Candidate | Impit profile | Result | Decision |
+|---|---|---|---|
+| Category listing HTML | `firefox144` desktop | HTTP 200, full HTML, `window.__INITIAL_STATE__` present | Selected |
+| Keyword + sort | `firefox144` desktop | HTTP 200, full HTML, state present for `q=laptop under 50000` and `sort=price_asc` | Selected |
+| Chrome desktop | `chrome` | Previously observed HTTP 403 with `Flipkart reCAPTCHA`; later direct probes were intermittently successful | Not used |
+| iOS mobile | `ios18` | TLS `ConnectError` against this target | Rejected |
+| Android/app profile | `okhttp4` | Returned listing HTML, but no stable app endpoint was discovered | Rejected |
+| Internal JSON endpoint | N/A | No stable unauthenticated endpoint richer than the embedded state | Rejected |
+
 ## Why This Was Selected
-- A direct `got-scraping` request with a Firefox-style desktop header profile returned a full listing page and a large `window.__INITIAL_STATE__` payload.
-- The payload is already rich enough to satisfy the actor’s current output without product detail page visits.
-- It works with plain `got-scraping` when the header profile is acceptable, which keeps the actor HTTP-based and within Apify QA time limits.
 
-## Rejected Candidates
-- URLScan public domain search:
-  - Recent public results were unrelated to the target listing page, so they were not reliable for this actor.
-- URLScan scan submission:
-  - The scan API returned `401` because a key is now required for submission from this environment.
-- `__NEXT_DATA__`:
-  - Not present on the tested Flipkart listing page.
-- JSON-LD:
-  - Present but not rich enough for listing extraction and did not expose the same product coverage as `window.__INITIAL_STATE__`.
-- Direct internal JSON endpoint:
-  - No stable unauthenticated JSON endpoint was confirmed from this environment that was richer than the embedded state object.
+- A direct browser-style GET returns a rich listing page and a large `window.__INITIAL_STATE__` payload without authentication.
+- The supplied category URL can return a 301 to a canonical category path; following redirects and using the final URL preserves the browser flow.
+- Flipkart's browser URLs accept `q` and `sort` parameters. Verified examples include `sort=price_asc`.
+- The same HTML/state extraction supports category URLs and keyword searches without product detail page visits, preserving coverage and speed.
 
-## Headers And Diagnostics Notes
-- Working request profile observed:
-  - `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:147.0) Gecko/20100101 Firefox/147.0`
-  - `Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8`
-  - `Accept-Language: en-US,en;q=0.9`
-  - `Upgrade-Insecure-Requests: 1`
-- Failing request profile observed:
-  - A Chromium-style request returned `403` with title `Flipkart reCAPTCHA`
-- Diagnostic rule for the actor:
-  - On fetch or extraction failure, read this file first, then re-test the listing URL and normalized fallback URL with `got-scraping` across multiple header profiles.
-  - Record status code, final URL, title, body length, and whether `window.__INITIAL_STATE__` or JSON-LD is present.
+## Headers, Cookies, And Session Notes
+
+- The discovery run found a working Firefox-style desktop request with `Accept`, `Accept-Language`, `Upgrade-Insecure-Requests`, and a Firefox desktop user agent.
+- The installed Impit version supports `firefox144`, so the actor uses `browser: 'firefox144'` rather than overriding the generated user agent with an unsupported Firefox version.
+- Impit generates the browser fingerprint headers and TLS profile. The actor does not manually override `User-Agent`, `Accept`, `Accept-Language`, `Sec-CH-UA`, or `Sec-Fetch-*`.
+- The target sets session cookies, including `ud`, on the initial HTML response. One cookie-aware Impit client is reused for all pages in a transport session.
+- The initial browser navigation has no synthetic `Origin` or `Referer` requirement. The actor does not add either header to the document GET, avoiding an inconsistent cross-context request.
+- Requests remain sequential because pagination is an ordered browser navigation flow. Normal successful requests have no artificial delay; bounded backoff is used only for network errors, 408, 425, 429, and 5xx responses.
+
+## Query, Pagination, And Recovery Notes
+
+- A run accepts one source: `startUrl` for a category/search URL or `keyword` for a keyword search. When both are supplied, the keyword is the active source and the actor performs one run, not two.
+- If a user supplies no source, the schema/local QA URL is the only fallback; user-provided fields are never replaced with `INPUT.json` values.
+- `keyword` switches to Flipkart's `/search` path and sets `q` plus `otracker=search`.
+- `sort` supports `relevance`, `popularity`, `price_asc`, `price_desc`, and `newest`.
+- Query parameters already present in a user-supplied URL are preserved unless an explicit keyword or sort input replaces the same parameter.
+- Price sorting is normalized locally when `price_asc` or `price_desc` is requested, while other sort modes retain the service order.
+- Pagination follows the state/page links and retains the keyword, sort, and URL query parameters. Duplicate pages are stopped using stable product keys.
+- Permanent 4xx responses are not retried. Temporary failures receive at most the configured bounded retries, then the actor tries the alternate URL/transport and stores structured diagnostics.
 
 ## Implementation Guidance
-- Stay HTTP-based with `got-scraping`.
+
+- Stay HTTP-based with Impit and use the supported Firefox desktop profile selected above.
 - Normalize listing URLs because Flipkart may redirect category paths.
-- Prefer `window.__INITIAL_STATE__`.
+- Prefer `window.__INITIAL_STATE__` and retain JSON-LD only as the existing fallback.
 - If the state object path shifts, search the entire parsed state recursively for listing products instead of assuming a single property path.
 - If no products are found, capture diagnostics and store them for review instead of silently returning an empty dataset.
