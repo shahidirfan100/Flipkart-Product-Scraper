@@ -44,7 +44,7 @@
 - Query parameters already present in a user-supplied URL are preserved unless an explicit keyword or sort input replaces the same parameter.
 - Price sorting is normalized locally when `price_asc` or `price_desc` is requested, while other sort modes retain the service order.
 - Pagination follows the state/page links and retains the keyword, sort, and URL query parameters. Duplicate pages are stopped using stable product keys.
-- Permanent 4xx responses are not retried. Temporary failures receive at most the configured bounded retries, then the actor tries the alternate URL/transport and stores structured diagnostics.
+- Permanent 4xx responses are not retried. Temporary failures receive at most the configured bounded retries, then the actor tries the configured alternate transport and stores structured diagnostics.
 
 ## Implementation Guidance
 

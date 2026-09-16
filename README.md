@@ -92,7 +92,7 @@ Collect the first set of products from a Flipkart category page:
 
 ```json
 {
-  "startUrl": "https://www.flipkart.com/computers/computer-components/monitors/pr?sid=6bo,g0i,9no&marketplace=FLIPKART",
+  "startUrl": "https://www.flipkart.com/computers/computer-components/monitors-accessories/monitors/pr?sid=6bo,g0i,unb,pp8&marketplace=FLIPKART",
   "results_wanted": 20
 }
 ```

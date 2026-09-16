@@ -9,8 +9,8 @@
       "type": "string",
       "description": "Optional Flipkart category or search URL. Use this or keyword, not both; keyword takes priority if both are supplied.",
       "editor": "textfield",
-      "prefill": "https://www.flipkart.com/computers/computer-components/monitors/pr?sid=6bo,g0i,9no&marketplace=FLIPKART",
-      "example": "https://www.flipkart.com/computers/computer-components/monitors/pr?sid=6bo,g0i,9no&marketplace=FLIPKART"
+      "prefill": "https://www.flipkart.com/computers/computer-components/monitors-accessories/monitors/pr?sid=6bo,g0i,unb,pp8&marketplace=FLIPKART",
+      "example": "https://www.flipkart.com/computers/computer-components/monitors-accessories/monitors/pr?sid=6bo,g0i,unb,pp8&marketplace=FLIPKART"
     },
     "keyword": {
       "title": "Keyword Search",

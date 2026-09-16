@@ -121,35 +121,7 @@ const buildPageUrl = (baseUrl, page) => {
     return url.href;
 };
 
-const buildFallbackUrls = (rawUrl) => {
-    const seen = new Set();
-    const candidates = [];
-
-    const add = (value) => {
-        if (!value || seen.has(value)) return;
-        seen.add(value);
-        candidates.push(value);
-    };
-
-    const base = normalizeFlipkartUrl(rawUrl);
-    add(base.href);
-
-    const normalized = new URL(base.href);
-    if (normalized.pathname.includes('/monitors/pr') && !normalized.pathname.includes('/monitors-accessories/monitors/pr')) {
-        normalized.pathname = normalized.pathname.replace('/monitors/pr', '/monitors-accessories/monitors/pr');
-        add(normalized.href);
-    }
-
-    const withoutMarketplace = new URL(base.href);
-    withoutMarketplace.searchParams.delete('marketplace');
-    add(withoutMarketplace.href);
-
-    const trimmedPath = new URL(base.href);
-    trimmedPath.pathname = trimmedPath.pathname.replace(/\/+$/, '') || '/';
-    add(trimmedPath.href);
-
-    return candidates;
-};
+const buildFallbackUrls = (rawUrl) => [normalizeFlipkartUrl(rawUrl).href];
 
 const getPaginationBaseUrl = (rawUrl) => {
     const url = normalizeFlipkartUrl(rawUrl);
